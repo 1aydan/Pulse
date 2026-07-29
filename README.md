@@ -172,6 +172,17 @@ per asset, and (with `-FailOnRegression`) exits 1 when the overall score dropped
 Critical/High issues appeared. It refuses to compare truncated reports or reports produced under
 different settings — those deltas would be noise, not signal.
 
+### Turning categories off
+
+Every category is audited by default. To switch one off permanently, add its name to
+**Project Settings → Plugins → Pulse → Categories → Disabled Categories** (a dropdown of the
+registered categories, so plugin-provided collectors appear too). A disabled category is not
+enumerated, scored, or written at all — it never shows up as an empty report section and never
+affects the overall score, and the run logs which categories it skipped.
+
+Use this when the intent is permanent ("this project has no Niagara worth auditing"); use
+`-category=` to narrow a single run.
+
 ## Known limitations
 
 - **Fast-tier texture dimensions are the *source* size**, from the registry's `Dimensions` tag

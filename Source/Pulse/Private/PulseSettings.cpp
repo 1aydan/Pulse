@@ -3,6 +3,8 @@
 #include "PulseSettings.h"
 
 #include "Misc/SecureHash.h"
+#include "PulseCollector.h"
+#include "PulseCollectorRegistry.h"
 #include "UObject/UnrealType.h"
 
 UPulseSettings::UPulseSettings()
@@ -27,6 +29,24 @@ UPulseSettings::UPulseSettings()
 	Scoring.CategoryWeights.Add(FName(TEXT("SkeletalMesh")), 0.8f);
 	Scoring.CategoryWeights.Add(FName(TEXT("Blueprint")), 0.8f);
 	Scoring.CategoryWeights.Add(FName(TEXT("Niagara")), 0.8f);
+}
+
+TArray<FString> UPulseSettings::GetRegisteredCategoryOptions() const
+{
+	// Asked by the details panel at edit time, so the list reflects whatever is actually registered
+	// — including collectors added by other plugins, which a hardcoded checkbox per category could
+	// never offer.
+	TArray<FString> Options;
+	for (const IPulseCollector* Collector : FPulseCollectorRegistry::GetAllSorted())
+	{
+		Options.AddUnique(Collector->GetCategory().ToString());
+	}
+	return Options;
+}
+
+bool UPulseSettings::IsCategoryEnabled(FName Category) const
+{
+	return !DisabledCategories.Contains(Category);
 }
 
 FString UPulseSettings::ComputeSettingsHash() const

@@ -58,6 +58,41 @@ bool FPulseScanDriver::Initialize(FString& OutError)
 		return false;
 	}
 
+	// Categories switched off in project settings drop out here, after the run's own filter, so a
+	// disabled category is never enumerated, scored, or written — not even as an empty section.
+	// Removal is announced: a silently absent category reads as a category with nothing wrong.
+	TArray<FString> SkippedCategories;
+	Collectors.RemoveAll([this, &SkippedCategories](const IPulseCollector* Collector)
+	{
+		const FName Category = Collector->GetCategory();
+		if (Settings->IsCategoryEnabled(Category))
+		{
+			return false;
+		}
+		SkippedCategories.AddUnique(Category.ToString());
+		return true;
+	});
+
+	if (!SkippedCategories.IsEmpty())
+	{
+		SkippedCategories.Sort([](const FString& A, const FString& B)
+		{
+			return A.Compare(B, ESearchCase::CaseSensitive) < 0;
+		});
+		UE_LOG(LogPulse, Display, TEXT("Pulse: skipping %s — disabled in Pulse settings (DisabledCategories)."),
+			*FString::Join(SkippedCategories, TEXT(", ")));
+	}
+
+	if (Collectors.IsEmpty())
+	{
+		// Naming the disabled categories matters most here: someone who passed -category=Level and
+		// got nothing needs to know the setting overrode them, not that the scan found no levels.
+		OutError = FString::Printf(
+			TEXT("Every matching category is disabled in Pulse settings (DisabledCategories): %s. Remove it there, or target a different category."),
+			*FString::Join(SkippedCategories, TEXT(", ")));
+		return false;
+	}
+
 	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 	IAssetRegistry& Registry = AssetRegistryModule.Get();
 	Registry.SearchAllAssets(/*bSynchronousSearch*/ true);

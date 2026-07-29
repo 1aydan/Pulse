@@ -3,8 +3,6 @@
 #include "PulseAuditCommandlet.h"
 
 #include "Pulse.h"
-#include "PulseCollector.h"
-#include "PulseCollectorRegistry.h"
 #include "PulseReportWriter.h"
 #include "PulseResult.h"
 #include "PulseRunConfig.h"
@@ -41,27 +39,8 @@ int32 UPulseAuditCommandlet::Main(const FString& Params)
 	UE_LOG(LogPulse, Display, TEXT("Pulse audit starting: %s"), *Config.ToString());
 	UE_LOG(LogPulse, Display, TEXT("Settings hash: %s"), *Settings.ComputeSettingsHash());
 
-	TArray<IPulseCollector*> Collectors = FPulseCollectorRegistry::GetAllSorted();
-	if (!Config.CategoryFilter.IsEmpty())
-	{
-		Collectors.RemoveAll([&Config](const IPulseCollector* Collector)
-		{
-			return !Config.CategoryFilter.ContainsByPredicate([Collector](const FString& Category)
-			{
-				return Category.Equals(Collector->GetCategory().ToString(), ESearchCase::IgnoreCase);
-			});
-		});
-	}
-
-	if (Collectors.IsEmpty())
-	{
-		UE_LOG(LogPulse, Error, TEXT("No collectors match -category=. Registered collectors: %d."),
-			FPulseCollectorRegistry::GetAllSorted().Num());
-		return 2;
-	}
-
-	UE_LOG(LogPulse, Display, TEXT("Running %d collectors."), Collectors.Num());
-
+	// Collector selection — the -category= filter and the settings' DisabledCategories — lives in the
+	// driver, so the commandlet and the editor panel cannot drift apart on which assets get audited.
 	FPulseScanDriver Driver(Config, Settings);
 	if (!Driver.Initialize(Error))
 	{

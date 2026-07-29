@@ -332,6 +332,26 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category = "Thresholds")
 	FPulseLevelThresholds Level;
 
+	/**
+	 * Asset categories to skip entirely, by collector category name (Texture, StaticMesh,
+	 * SkeletalMesh, Material, Blueprint, Niagara, Level, or any registered by another plugin).
+	 * Empty by default: every category is audited unless it is listed here.
+	 *
+	 * A skipped category is not enumerated, scored, or written at all — it does not appear in the
+	 * report as an empty section, and it never affects the overall score. Prefer this over
+	 * -category= when the intent is permanent (this project has no Niagara worth auditing);
+	 * -category= is for narrowing a single run.
+	 */
+	UPROPERTY(EditAnywhere, Config, Category = "Categories", meta = (GetOptions = "GetRegisteredCategoryOptions"))
+	TArray<FName> DisabledCategories;
+
+	/** Registered category names, so DisabledCategories offers a dropdown instead of free text. */
+	UFUNCTION()
+	TArray<FString> GetRegisteredCategoryOptions() const;
+
+	/** True when the category should be audited — i.e. it is not listed in DisabledCategories. */
+	bool IsCategoryEnabled(FName Category) const;
+
 	/** Rules suppressed entirely. Lets a project opt out of a rule without a code change or a fork. */
 	UPROPERTY(EditAnywhere, Config, Category = "Rules")
 	TArray<FName> DisabledRules;
