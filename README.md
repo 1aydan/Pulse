@@ -48,7 +48,7 @@ UnrealEditor-Cmd.exe <Project>.uproject -run=Pulse.PulseAudit -unattended -nospl
 ```
 
 That line alone runs a Fast-tier audit of the whole project and writes reports to
-`Saved/PulseAudit/`. Switches:
+`Saved/Pulse/`. Switches:
 
 | Switch | Effect |
 |---|---|
@@ -58,7 +58,7 @@ That line alone runs a Fast-tier audit of the whole project and writes reports t
 | `-path=/Game/X` | Restrict the scan to these package paths |
 | `-minseverity=S` | Hide report rows below severity `S` (`Info`/`Low`/`Medium`/`High`/`Critical`). Filters rows only — never scores |
 | `-maxassets=N` | Cap assets per category (a prefix of the sorted list). Marks the report truncated |
-| `-reportdir=D` | Report output directory (default `Saved/PulseAudit`) |
+| `-reportdir=D` | Report output directory (default `Saved/Pulse`) |
 | `-format=csv,json` | Which report formats to write (default both) |
 | `-failunder=F` | Exit 1 when the overall score lands below `F` |
 | `-gcfreq=N` | Packages loaded between garbage collections at Deep tier (default 100) |
@@ -83,9 +83,27 @@ Every metric records the tier that produced it, and the report header records th
 — a Fast report can never be mistaken for a Deep one. Deep-tier CSV columns are present but empty
 in a Fast run, so the header row is identical across tiers and diffs show only real change.
 
+### Cooked texture memory needs rendering enabled
+
+`Texture.MemoryBytes`, `CookedWidth`, `CookedHeight`, and `NumMips` come from the texture's built
+platform data, and the engine only builds that when `FApp::CanEverRender()` is true. That is false
+whenever `-nullrhi` is passed **or** the process is a commandlet without `-AllowCommandletRendering`
+— so the standard headless invocation above cannot measure them. To collect them, drop `-nullrhi`
+and add `-AllowCommandletRendering`:
+
+```
+UnrealEditor-Cmd.exe <Project>.uproject -run=Pulse.PulseAudit -deep -category=Texture ^
+    -unattended -nosplash -nop4 -AllowCommandletRendering
+```
+
+Expect a slower start, since enabling rendering makes the engine compile its default material
+shaders during boot. When these metrics are unavailable Pulse **omits them entirely** rather than
+writing zeros, and logs one warning naming the flags — an unmeasured texture must never be
+mistaken for a free one. Every other Deep metric works fine under `-nullrhi`.
+
 ## Reports
 
-Written to `Saved/PulseAudit/` (`-reportdir=` overrides):
+Written to `Saved/Pulse/` (`-reportdir=` overrides):
 
 | File | Contents |
 |---|---|

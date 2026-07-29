@@ -5,6 +5,8 @@
 #include "AssetRegistry/AssetData.h"
 #include "Engine/Texture2D.h"
 #include "Engine/TextureDefines.h"
+#include "Misc/App.h"
+#include "Pulse.h"
 #include "PulseCollectorRegistry.h"
 #include "PulseSettings.h"
 #include "PulseTagUtils.h"
@@ -180,18 +182,58 @@ void FPulseTextureCollector::CollectDeep(const FPulseCollectContext& Context, FP
 {
 	// The driver's class filter matched, but LoadedObject is whatever actually loaded — a failed
 	// load or an unexpected subclass resolution must degrade to Fast-only, not crash.
-	const UTexture2D* Texture = Cast<UTexture2D>(Context.LoadedObject);
+	UTexture2D* Texture = Cast<UTexture2D>(Context.LoadedObject);
 	if (Texture == nullptr)
 	{
 		return;
 	}
 
+	// Force the platform data build, then block on it. Merely waiting is not enough: UTexture::PostLoad
+	// only starts caching when FApp::CanEverRender(), which is false in every commandlet, so a headless
+	// audit never starts a build and a wait has nothing to wait on. Until the build runs the engine
+	// hands back a default texture whose size and memory read as zero — and a texture that was never
+	// measured must never be reported as a texture that costs nothing.
+	Texture->BeginCachePlatformData();
+	Texture->FinishCachePlatformData();
+	Texture->BlockOnAnyAsyncBuild();
+
 	// TMC_AllMips is the honest cooked cost: resident-mips would depend on the streaming state of
 	// the editor process running the audit, which is noise.
 	const int64 MemoryBytes = static_cast<int64>(Texture->CalcTextureMemorySizeEnum(TMC_AllMips));
+	const int32 CookedWidth = Texture->GetSizeX();
+	const int32 CookedHeight = Texture->GetSizeY();
+
+	// Zero dimensions mean the platform data still is not there (an unbuilt texture, or a build that
+	// failed). Emit nothing rather than a zero: an unmeasured texture must never read as a free one,
+	// and the missing-tag counter is what tells the reader this run is incomplete.
+	if (CookedWidth <= 0 || CookedHeight <= 0)
+	{
+		InOutResult.NumMissingExpectedTags++;
+
+		// Explain the whole-run cause once rather than repeating it per texture. FApp::CanEverRender()
+		// gates the platform-data build, and it is false whenever -nullrhi is present OR the process
+		// is a commandlet without -AllowCommandletRendering — so the default headless CI invocation
+		// can never measure cooked texture memory, and silence here would read as "no textures are
+		// expensive" rather than "nothing was measured".
+		static bool bLoggedCannotRender = false;
+		if (!FApp::CanEverRender() && !bLoggedCannotRender)
+		{
+			bLoggedCannotRender = true;
+			UE_LOG(LogPulse, Warning,
+				TEXT("Pulse.Texture: cooked texture size and memory are unavailable in this session, so those metrics are omitted rather than reported as zero. ")
+				TEXT("Building texture platform data requires FApp::CanEverRender(): re-run with -AllowCommandletRendering and without -nullrhi to measure them."));
+		}
+		else if (FApp::CanEverRender())
+		{
+			UE_LOG(LogPulse, Verbose, TEXT("Pulse.Texture: no platform data for %s; skipping its Deep metrics."),
+				*Context.AssetData.GetSoftObjectPath().ToString());
+		}
+		return;
+	}
+
 	InOutResult.Metrics.Add(FPulseMetric::MakeInt(TEXT("MemoryBytes"), MemoryBytes, EPulseMetricUnit::Bytes, EPulseTier::Deep));
-	InOutResult.Metrics.Add(FPulseMetric::MakeInt(TEXT("CookedWidth"), Texture->GetSizeX(), EPulseMetricUnit::Pixels, EPulseTier::Deep));
-	InOutResult.Metrics.Add(FPulseMetric::MakeInt(TEXT("CookedHeight"), Texture->GetSizeY(), EPulseMetricUnit::Pixels, EPulseTier::Deep));
+	InOutResult.Metrics.Add(FPulseMetric::MakeInt(TEXT("CookedWidth"), CookedWidth, EPulseMetricUnit::Pixels, EPulseTier::Deep));
+	InOutResult.Metrics.Add(FPulseMetric::MakeInt(TEXT("CookedHeight"), CookedHeight, EPulseMetricUnit::Pixels, EPulseTier::Deep));
 	InOutResult.Metrics.Add(FPulseMetric::MakeInt(TEXT("NumMips"), Texture->GetNumMips(), EPulseMetricUnit::Count, EPulseTier::Deep));
 }
 

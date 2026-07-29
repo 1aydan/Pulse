@@ -13,7 +13,7 @@
         1  score below -FailUnder, or a report file could not be written
         2  bad invocation
 
-    Reports land in <Project>/Saved/PulseAudit by default (-ReportDir overrides). Two runs on
+    Reports land in <Project>/Saved/Pulse by default (-ReportDir overrides). Two runs on
     unchanged content produce byte-identical reports, so archiving Statistics.json per build and
     diffing with Compare-PulseReport.ps1 gives a regression gate.
 
@@ -45,7 +45,7 @@
     Cap assets per category. Marks the report truncated; truncated reports are not comparable.
 
 .PARAMETER ReportDir
-    Report output directory. Default: <Project>/Saved/PulseAudit.
+    Report output directory. Default: <Project>/Saved/Pulse.
 
 .PARAMETER Format
     Report formats to write: csv, json. Default: both.
@@ -163,7 +163,7 @@ Info "Running: UnrealEditor-Cmd.exe $($CommandletArgs -join ' ')"
 & $EditorCmd @CommandletArgs
 $AuditExitCode = $LASTEXITCODE
 
-$EffectiveReportDir = if ($ReportDir) { $ReportDir } else { Join-Path (Split-Path $ProjectFile -Parent) 'Saved\PulseAudit' }
+$EffectiveReportDir = if ($ReportDir) { $ReportDir } else { Join-Path (Split-Path $ProjectFile -Parent) 'Saved\Pulse' }
 switch ($AuditExitCode) {
     0 { Info "Audit passed. Reports: $EffectiveReportDir" }
     1 { Write-Host "Pulse: Audit FAILED: score below the -FailUnder gate, or a report could not be written. Reports (if any): $EffectiveReportDir" -ForegroundColor Red }

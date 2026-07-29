@@ -31,7 +31,7 @@ struct FPulseScanSettings
 
 	/** Relative paths resolve against the project directory. */
 	UPROPERTY(EditAnywhere, Config, Category = "Report")
-	FString ReportDirectory = TEXT("Saved/PulseAudit");
+	FString ReportDirectory = TEXT("Saved/Pulse");
 
 	/** Historical PulseAudit_<timestamp>.json snapshots kept; oldest pruned. 0 = keep all. */
 	UPROPERTY(EditAnywhere, Config, Category = "Report", meta = (ClampMin = 0))
