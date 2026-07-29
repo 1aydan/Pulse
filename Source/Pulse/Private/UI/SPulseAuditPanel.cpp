@@ -6,6 +6,7 @@
 #include "AssetRegistry/IAssetRegistry.h"
 #include "ContentBrowserModule.h"
 #include "IContentBrowserSingleton.h"
+#include "ISettingsModule.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Modules/ModuleManager.h"
 #include "Pulse.h"
@@ -207,13 +208,21 @@ TSharedRef<SWidget> SPulseAuditPanel::BuildControlsRow()
 			.OnClicked(this, &SPulseAuditPanel::OnCancelClicked)
 		]
 
-		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
 		[
 			SNew(SButton)
 			.Text(LOCTEXT("ExportButton", "Export report"))
 			.ToolTipText(LOCTEXT("ExportTooltip", "Writes the same CSV and JSON files the commandlet produces, into the report directory from Pulse settings."))
 			.IsEnabled(this, &SPulseAuditPanel::IsExportEnabled)
 			.OnClicked(this, &SPulseAuditPanel::OnExportClicked)
+		]
+
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+		[
+			SNew(SButton)
+			.Text(LOCTEXT("SettingsButton", "Settings"))
+			.ToolTipText(LOCTEXT("SettingsTooltip", "Opens Project Settings at the Pulse section, where thresholds, disabled rules, and disabled categories live. Re-run the scan after changing them."))
+			.OnClicked(this, &SPulseAuditPanel::OnOpenSettingsClicked)
 		];
 }
 
@@ -354,6 +363,23 @@ FReply SPulseAuditPanel::OnExportClicked()
 		StatusText->SetText(FText::Format(LOCTEXT("StatusExported", "Report written to {0}"), FText::FromString(LastReportDir)));
 	}
 	UE_LOG(LogPulse, Display, TEXT("Pulse panel: report written to %s"), *LastReportDir);
+
+	return FReply::Handled();
+}
+
+FReply SPulseAuditPanel::OnOpenSettingsClicked()
+{
+	// The three names come from the settings object itself rather than string literals, so this
+	// button keeps working if GetCategoryName() or the class name ever changes.
+	if (ISettingsModule* SettingsModule = FModuleManager::GetModulePtr<ISettingsModule>("Settings"))
+	{
+		const UPulseSettings* Settings = GetDefault<UPulseSettings>();
+		SettingsModule->ShowViewer(Settings->GetContainerName(), Settings->GetCategoryName(), Settings->GetSectionName());
+	}
+	else if (StatusText.IsValid())
+	{
+		StatusText->SetText(LOCTEXT("StatusNoSettingsModule", "The Settings module is unavailable; open Project Settings > Plugins > Pulse manually."));
+	}
 
 	return FReply::Handled();
 }

@@ -46,7 +46,16 @@ TArray<FString> UPulseSettings::GetRegisteredCategoryOptions() const
 
 bool UPulseSettings::IsCategoryEnabled(FName Category) const
 {
-	return !DisabledCategories.Contains(Category);
+	// An empty TArray<FName> serialises as a literal "None" entry, so a freshly written ini comes
+	// back with one NAME_None element. Guarding the query keeps a nameless entry from ever matching
+	// a real category, and keeps that ini line from looking like it does something.
+	return Category.IsNone() || !DisabledCategories.Contains(Category);
+}
+
+bool UPulseSettings::IsRuleDisabled(FName RuleId) const
+{
+	// Same NAME_None caveat as IsCategoryEnabled.
+	return !RuleId.IsNone() && DisabledRules.Contains(RuleId);
 }
 
 FString UPulseSettings::ComputeSettingsHash() const

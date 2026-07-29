@@ -356,6 +356,9 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category = "Rules")
 	TArray<FName> DisabledRules;
 
+	/** True when the rule is listed in DisabledRules and should never produce an issue. */
+	bool IsRuleDisabled(FName RuleId) const;
+
 	/** Per-rule severity overrides, applied by the driver after Evaluate. The main tuning hatch. */
 	UPROPERTY(EditAnywhere, Config, Category = "Rules")
 	TMap<FName, EPulseSeverity> RuleSeverityOverrides;

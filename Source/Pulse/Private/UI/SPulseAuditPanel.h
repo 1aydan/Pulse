@@ -41,6 +41,9 @@ private:
 	FReply OnCancelClicked();
 	FReply OnExportClicked();
 
+	/** Opens Project Settings focused on Pulse, so thresholds are one click from the findings. */
+	FReply OnOpenSettingsClicked();
+
 	bool IsRunEnabled() const;
 	bool IsCancelEnabled() const;
 	bool IsExportEnabled() const;

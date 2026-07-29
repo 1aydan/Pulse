@@ -295,7 +295,7 @@ void FPulseScanDriver::ProcessOneAsset(FPulseCollectorWork& Work)
 	for (int32 IssueIndex = Result.Issues.Num() - 1; IssueIndex >= 0; --IssueIndex)
 	{
 		FPulseIssue& Issue = Result.Issues[IssueIndex];
-		if (Settings->DisabledRules.Contains(Issue.RuleId))
+		if (Settings->IsRuleDisabled(Issue.RuleId))
 		{
 			Result.Issues.RemoveAt(IssueIndex);
 			continue;

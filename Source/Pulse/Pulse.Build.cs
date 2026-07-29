@@ -28,6 +28,7 @@ public class Pulse : ModuleRules
 			"Projects",
 			"RHI",
 			"RenderCore",
+			"Settings",
 			"Slate",
 			"SlateCore",
 			"UnrealEd",
