@@ -108,6 +108,38 @@ struct FPulseMetric
 	}
 };
 
+/** One metric a collector can emit, declared up front so CSV columns are fixed across runs. */
+struct FPulseMetricDesc
+{
+	/** Unqualified, e.g. "Triangles". The report writer prefixes the category on output. */
+	FName Name;
+
+	EPulseMetricKind Kind = EPulseMetricKind::Int;
+	EPulseMetricUnit Unit = EPulseMetricUnit::None;
+
+	// Lowest tier at which this metric is producible. A Fast run leaves Deep-tier columns empty
+	// rather than absent, so the CSV header is identical run to run and diffs show only real change.
+	EPulseTier MinTier = EPulseTier::Fast;
+
+	const TCHAR* Description = nullptr;
+};
+
+/** One rule a collector can fire, declared up front so the report can list rules it did NOT evaluate. */
+struct FPulseRuleDesc
+{
+	/** Stable, greppable, "<Category>.<Condition>", e.g. "StaticMesh.MissingLODs". Never rename. */
+	FName RuleId;
+
+	EPulseSeverity DefaultSeverity = EPulseSeverity::Medium;
+	EPulseTier MinTier = EPulseTier::Fast;
+
+	const TCHAR* Description = nullptr;
+
+	// Filled into every FPulseIssue this rule produces, so the collector only supplies the observed
+	// numbers and the fix text is authored in exactly one place.
+	const TCHAR* Recommendation = nullptr;
+};
+
 /** One rule firing against one asset. */
 struct FPulseIssue
 {
@@ -215,6 +247,12 @@ struct FPulseCategoryResult
 
 	/** Rules this category declares but could not evaluate at the achieved tier. */
 	TArray<FName> UnevaluatedRuleIds;
+
+	/**
+	 * The union of every contributing collector's metric schema, in declaration order. Drives the
+	 * Assets_<Category>.csv column set, so columns come from schema — never from observed data.
+	 */
+	TArray<FPulseMetricDesc> MetricSchema;
 
 	TArray<FPulseAssetResult> Assets;
 };

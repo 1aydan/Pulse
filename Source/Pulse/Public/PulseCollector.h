@@ -7,42 +7,14 @@
 #include "PulseResult.h"
 #include "PulseTypes.h"
 
+class IAssetRegistry;
 class UPulseSettings;
 struct FAssetData;
 
-/** One metric a collector can emit, declared up front so CSV columns are fixed across runs. */
-struct FPulseMetricDesc
-{
-	/** Unqualified, e.g. "Triangles". The report writer prefixes the category on output. */
-	FName Name;
+// FPulseMetricDesc and FPulseRuleDesc live in PulseResult.h so the report model can carry a
+// category's schema without depending on the collector interface.
 
-	EPulseMetricKind Kind = EPulseMetricKind::Int;
-	EPulseMetricUnit Unit = EPulseMetricUnit::None;
-
-	// Lowest tier at which this metric is producible. A Fast run leaves Deep-tier columns empty
-	// rather than absent, so the CSV header is identical run to run and diffs show only real change.
-	EPulseTier MinTier = EPulseTier::Fast;
-
-	const TCHAR* Description = nullptr;
-};
-
-/** One rule a collector can fire, declared up front so the report can list rules it did NOT evaluate. */
-struct FPulseRuleDesc
-{
-	/** Stable, greppable, "<Category>.<Condition>", e.g. "StaticMesh.MissingLODs". Never rename. */
-	FName RuleId;
-
-	EPulseSeverity DefaultSeverity = EPulseSeverity::Medium;
-	EPulseTier MinTier = EPulseTier::Fast;
-
-	const TCHAR* Description = nullptr;
-
-	// Filled into every FPulseIssue this rule produces, so the collector only supplies the observed
-	// numbers and the fix text is authored in exactly one place.
-	const TCHAR* Recommendation = nullptr;
-};
-
-/** Everything a collector is allowed to see. Deliberately narrow: no registry, no package loading. */
+/** Everything a collector is allowed to see. Deliberately narrow: no package loading. */
 struct FPulseCollectContext
 {
 	/** Always valid. At Fast tier this is the ONLY thing populated. */
@@ -58,6 +30,13 @@ struct FPulseCollectContext
 
 	/** Thresholds. Read once by the driver via GetDefault<UPulseSettings>() and handed down. */
 	const UPulseSettings& Settings;
+
+	/**
+	 * Read-only registry access, always valid. Exists for collectors whose Fast tier must count
+	 * related packages — the level collector's World Partition actor census queries the map's
+	 * external-actor packages here. Queries only: loading through the registry is still forbidden.
+	 */
+	const IAssetRegistry* AssetRegistry = nullptr;
 
 	/** The tier this particular asset actually reached. May be below RunTier if loading failed. */
 	EPulseTier AchievedTier = EPulseTier::Fast;
