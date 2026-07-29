@@ -1,0 +1,30 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1.0",
+	"FriendlyName": "Pulse",
+	"Description": "Read-only performance audit for project assets. A commandlet and editor panel scan the Asset Registry (and, on request, loaded assets) to produce deterministic CSV and JSON reports of performance issues, per-asset scores, and project health for developers, artists, and CI.",
+	"Category": "Editor",
+	"CreatedBy": "Pulse contributors",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": false,
+	"IsBetaVersion": true,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "Pulse",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "Niagara",
+			"Enabled": true
+		}
+	]
+}
