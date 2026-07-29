@@ -8,6 +8,7 @@
 #include "PulseRunConfig.h"
 
 class FPulseShaderStatsBatch;
+class IAssetRegistry;
 class IPulseCollector;
 class UPulseSettings;
 
@@ -75,6 +76,9 @@ private:
 		TArray<FAssetData> Assets;
 
 		int32 NextAssetIndex = 0;
+
+		/** Rule schema by id, for post-processing: recommendations, disables, severity overrides. */
+		TMap<FName, FPulseRuleDesc> RuleById;
 	};
 
 	void ProcessOneAsset(FPulseCollectorWork& Work);
@@ -85,8 +89,14 @@ private:
 	FPulseRunConfig Config;
 	const UPulseSettings* Settings = nullptr;
 
+	/** Cached at Initialize for the collect contexts. Queries only; loading goes through GetAsset. */
+	const IAssetRegistry* AssetRegistry = nullptr;
+
 	TArray<FPulseCollectorWork> WorkQueue;
 	int32 CurrentWorkIndex = 0;
+
+	/** True when -maxassets clipped any category's list. Copied into the run header. */
+	bool bTruncated = false;
 
 	int32 AssetsProcessed = 0;
 	int32 AssetsTotal = 0;
