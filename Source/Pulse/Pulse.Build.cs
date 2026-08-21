@@ -22,6 +22,7 @@ public class Pulse : ModuleRules
 			"DeveloperSettings",
 			"InputCore",
 			"Json",
+			"LevelEditor",
 			"MaterialEditor",
 			"Niagara",
 			"PhysicsCore",

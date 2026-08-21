@@ -8,6 +8,7 @@
 #include "PulseCollectorRegistry.h"
 #include "Styling/AppStyle.h"
 #include "UI/SPulseAuditPanel.h"
+#include "UI/SPulseNiagaraAuditorPanel.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "WorkspaceMenuStructure.h"
 #include "WorkspaceMenuStructureModule.h"
@@ -17,6 +18,7 @@
 DEFINE_LOG_CATEGORY(LogPulse);
 
 static const FName GPulseAuditTabName(TEXT("PulseAudit"));
+static const FName GPulseNiagaraAuditorTabName(TEXT("PulseNiagaraAuditor"));
 
 static TSharedRef<SDockTab> SpawnPulseAuditTab(const FSpawnTabArgs& Args)
 {
@@ -24,6 +26,15 @@ static TSharedRef<SDockTab> SpawnPulseAuditTab(const FSpawnTabArgs& Args)
 		.TabRole(ETabRole::NomadTab)
 		[
 			SNew(SPulseAuditPanel)
+		];
+}
+
+static TSharedRef<SDockTab> SpawnPulseNiagaraAuditorTab(const FSpawnTabArgs& Args)
+{
+	return SNew(SDockTab)
+		.TabRole(ETabRole::NomadTab)
+		[
+			SNew(SPulseNiagaraAuditorPanel)
 		];
 }
 
@@ -56,6 +67,15 @@ void FPulseModule::StartupModule()
 		.SetTooltipText(LOCTEXT("TabTooltip", "Audit project assets for performance issues and export deterministic CSV/JSON reports."))
 		.SetGroup(MenuGroup.ToSharedRef())
 		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "MaterialEditor.TogglePlatformStats.Tab"));
+
+	// Separate tab, not a mode of the audit panel: this one spawns and ticks content in the user's
+	// open level, which is a different kind of act from a read-only scan and should look like one.
+	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(GPulseNiagaraAuditorTabName,
+		FOnSpawnTab::CreateStatic(&SpawnPulseNiagaraAuditorTab))
+		.SetDisplayName(LOCTEXT("NiagaraTabTitle", "Pulse Niagara Auditor"))
+		.SetTooltipText(LOCTEXT("NiagaraTabTooltip", "Spawn Niagara systems in the current level and measure their game-thread cost across quality levels and distances."))
+		.SetGroup(MenuGroup.ToSharedRef())
+		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "ClassIcon.NiagaraSystem"));
 }
 
 void FPulseModule::ShutdownModule()
@@ -63,6 +83,7 @@ void FPulseModule::ShutdownModule()
 	if (FSlateApplication::IsInitialized())
 	{
 		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(GPulseAuditTabName);
+		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(GPulseNiagaraAuditorTabName);
 	}
 	if (MenuGroup.IsValid())
 	{

@@ -24,6 +24,42 @@ enum class EPulseTier : uint8
 	ShaderStats = 2
 };
 
+/**
+ * The frame rate the project is built to hold. Deliberately a performance target rather than a
+ * platform tier: what actually constrains a budget is how many milliseconds a frame gets, and a
+ * 60 Hz phone and a 60 Hz console are under the same pressure. Several engine settings are already
+ * expressed in milliseconds per frame, so this turns rules that would otherwise be opinion
+ * ("5 ms of async loading is too much") into arithmetic against the budget.
+ */
+UENUM()
+enum class EPulsePerformanceTarget : uint8
+{
+	/** 33.3 ms per frame. */
+	FPS30 UMETA(DisplayName = "30 FPS"),
+
+	/** 16.7 ms per frame. */
+	FPS60 UMETA(DisplayName = "60 FPS"),
+
+	/** 8.3 ms per frame. */
+	FPS120 UMETA(DisplayName = "120 FPS"),
+
+	/** Use the explicit millisecond budget from settings instead of a standard rate. */
+	Custom UMETA(DisplayName = "Custom")
+};
+
+/** Frame budget in milliseconds for a standard target. Custom returns 0 — read the setting instead. */
+inline float PulseTargetFrameTimeMs(EPulsePerformanceTarget Target)
+{
+	switch (Target)
+	{
+		case EPulsePerformanceTarget::FPS30:  return 1000.0f / 30.0f;
+		case EPulsePerformanceTarget::FPS60:  return 1000.0f / 60.0f;
+		case EPulsePerformanceTarget::FPS120: return 1000.0f / 120.0f;
+		case EPulsePerformanceTarget::Custom: return 0.0f;
+	}
+	return 0.0f;
+}
+
 /** Issue severity. Ordered so a minimum-severity filter is a plain >= comparison. */
 UENUM()
 enum class EPulseSeverity : uint8
