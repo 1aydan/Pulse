@@ -53,7 +53,15 @@ enum class EPulseMemorySizeSource : uint8
 	DiskSize
 };
 
-/** Why an asset is top-level. Ordered by precedence: an asset that qualifies twice keeps the lowest. */
+/**
+ * Why an asset is top-level. Ordered by precedence: an asset that qualifies twice keeps the lowest.
+ *
+ * The first three are LOAD roots: something other than a reference loads them — the engine, a map
+ * transition, the Asset Manager. The rest are INSPECTION roots: "what would loading this cost?"
+ * questions about assets that normally load because something references them. The split matters
+ * for Unique (see FPulseMemoryNode::Retained): inspection roots must not change the load roots'
+ * numbers, or listing every Blueprint would quietly shrink every map's unique cost.
+ */
 enum class EPulseMemoryRootKind : uint8
 {
 	/** Resident in every map: Maps & Modes classes and AlwaysLoadedAssets. */
@@ -61,11 +69,24 @@ enum class EPulseMemoryRootKind : uint8
 
 	Map,
 
+	PrimaryAsset,
+
 	/** Matched AdditionalRootClasses. */
 	Configured,
 
-	PrimaryAsset
+	/** Any Blueprint under the scan paths (bIncludeBlueprints). */
+	Blueprint,
+
+	/** Asked for explicitly: dropped on the panel, or named with -inspect=. */
+	Inspected,
+
+	Count
 };
+
+inline bool PulseIsLoadRootKind(EPulseMemoryRootKind Kind)
+{
+	return Kind == EPulseMemoryRootKind::AlwaysLoaded || Kind == EPulseMemoryRootKind::Map || Kind == EPulseMemoryRootKind::PrimaryAsset;
+}
 
 inline const TCHAR* PulseMemoryRootKindToString(EPulseMemoryRootKind Kind)
 {
@@ -73,8 +94,11 @@ inline const TCHAR* PulseMemoryRootKindToString(EPulseMemoryRootKind Kind)
 	{
 	case EPulseMemoryRootKind::AlwaysLoaded: return TEXT("AlwaysLoaded");
 	case EPulseMemoryRootKind::Map:          return TEXT("Map");
-	case EPulseMemoryRootKind::Configured:   return TEXT("Configured");
 	case EPulseMemoryRootKind::PrimaryAsset: return TEXT("PrimaryAsset");
+	case EPulseMemoryRootKind::Configured:   return TEXT("Configured");
+	case EPulseMemoryRootKind::Blueprint:    return TEXT("Blueprint");
+	case EPulseMemoryRootKind::Inspected:    return TEXT("Inspected");
+	case EPulseMemoryRootKind::Count:        break;
 	}
 	return TEXT("Unknown");
 }
@@ -115,13 +139,18 @@ struct FPulseMemoryNode
 
 	/**
 	 * What would leave memory if this package stopped loading: its own cost plus everything only it
-	 * keeps alive. Computed as the package's subtree in the dominator tree of the hard graph rooted at
-	 * every top-level asset, the same "retained size" a heap profiler reports.
+	 * keeps alive. Computed as the package's subtree in the dominator tree of the hard graph under the
+	 * load roots — the same "retained size" a heap profiler reports. A package no load root reaches
+	 * (an unused Blueprint, a dropped asset) is measured in a second tree that adds the inspection
+	 * roots, so it still gets a figure without moving anyone else's.
 	 */
 	FPulseMemoryCost Retained;
 
-	/** Top-level assets whose hard closure contains this package. 0 means nothing analysed loads it. */
+	/** Load roots (maps, primary assets, always-loaded) whose hard closure contains this package. */
 	int32 NumRootsReaching = 0;
+
+	/** True when any top-level asset, inspection roots included, hard-references this package. */
+	bool bReachedByHardReference = false;
 
 	/** True when an always-loaded asset hard-references this package, directly or not. */
 	bool bInBaseline = false;
@@ -135,6 +164,9 @@ struct FPulseMemoryRoot
 
 	/** Where the root came from: a primary asset type, a settings field, a class. */
 	FString KindDetail;
+
+	/** Asked for explicitly (dropped on the panel or -inspect=), whatever Kind it also qualified as. */
+	bool bInspected = false;
 
 	/**
 	 * True for World Partition maps. Their actors are separate packages that stream per cell, so they
@@ -224,6 +256,16 @@ struct FPulseMemoryReport
 
 	/** "A; B; C (+4 more)": the referencers' asset names, capped for display. */
 	FString FormatReferencers(const FPulseMemoryReach& Reach, const TArray<int32>& ReferencerSlots, int32 MaxNames) const;
+
+	/**
+	 * Retained cost of every node reachable from RootSuccessors through hard references: each node's
+	 * subtree in the dominator tree under a virtual root that points at all of them. OutReachable marks
+	 * the nodes covered; the rest keep their own cost.
+	 *
+	 * With every load root, this is the game-wide Unique. With a single root, it is "how much would
+	 * this asset's total drop if that dependency stopped loading" — what an asset report ranks cuts by.
+	 */
+	void ComputeRetainedFrom(const TArray<int32>& RootSuccessors, TArray<FPulseMemoryCost>& OutRetained, TBitArray<>& OutReachable) const;
 
 	/** True when the root's totals exceed a configured budget. */
 	bool IsRootOverBudget(const FPulseMemoryRoot& Root) const;

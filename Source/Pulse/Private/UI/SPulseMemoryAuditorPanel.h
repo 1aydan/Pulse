@@ -55,6 +55,10 @@ struct FPulseMemoryTreeItem
  *
  * Runs the same FPulseMemoryAnalyzer as the commandlet. It reads only the Asset Registry, so a run
  * takes seconds and is wrapped in a slow-task dialog rather than ticked across frames.
+ *
+ * Assets dragged in from the Content Browser are inspected: added as top-level, pinned above the
+ * ranking and expanded. Inspecting re-runs the analysis rather than patching the last result, because
+ * a new top-level asset changes which packages the graph reaches and so the Unique figures around it.
  */
 class SPulseMemoryAuditorPanel : public SCompoundWidget
 {
@@ -66,6 +70,12 @@ public:
 
 	void Construct(const FArguments& InArgs);
 
+	// Drop target for Content Browser assets.
+	virtual void OnDragEnter(const FGeometry& MyGeometry, const FDragDropEvent& DragDropEvent) override;
+	virtual void OnDragLeave(const FDragDropEvent& DragDropEvent) override;
+	virtual FReply OnDragOver(const FGeometry& MyGeometry, const FDragDropEvent& DragDropEvent) override;
+	virtual FReply OnDrop(const FGeometry& MyGeometry, const FDragDropEvent& DragDropEvent) override;
+
 private:
 	TSharedRef<SWidget> BuildControlsRow();
 	TSharedRef<SWidget> BuildFilterRow();
@@ -75,6 +85,19 @@ private:
 	FReply OnExportClicked();
 	FReply OnOpenSettingsClicked();
 	bool IsExportEnabled() const;
+
+	/** Drops the results and every inspected asset, back to the state the panel opened in. */
+	FReply OnClearClicked();
+	bool IsClearEnabled() const;
+
+	/** Runs the analyzer with the current settings plus InspectedPackages. False when it stopped early. */
+	bool RunAnalysis();
+
+	/** Adds packages to the inspected set and re-runs; then selects and expands the first of them. */
+	void InspectPackages(const TArray<FName>& PackageNames);
+
+	/** Selects, expands and scrolls to a package's top-level row, if it has one. */
+	void FocusRootForPackage(FName PackageName);
 
 	FText GetStatusText() const;
 	FText GetSummaryText() const;
@@ -113,6 +136,11 @@ private:
 	void BrowseToItem(TSharedPtr<FPulseMemoryTreeItem> Item) const;
 	void OpenReferenceViewer(TSharedPtr<FPulseMemoryTreeItem> Item) const;
 	void CopyReferenceChain(TSharedPtr<FPulseMemoryTreeItem> Item) const;
+	void InspectItem(TSharedPtr<FPulseMemoryTreeItem> Item);
+
+	/** Writes the per-asset report (Summary.md and Dependencies.csv) for a top-level row, then opens its folder. */
+	void ExportAssetReport(TSharedPtr<FPulseMemoryTreeItem> Item);
+	void StopInspectingItem(TSharedPtr<FPulseMemoryTreeItem> Item);
 
 	/** Shared with the rows, which read it every paint; null until the first run. */
 	TSharedPtr<FPulseMemoryReport> Report;
@@ -131,4 +159,7 @@ private:
 
 	FString StatusLine;
 	FString LastExportDir;
+
+	/** Package names inspected this session, in the order they were added. Survive re-runs; Clear empties them. */
+	TArray<FName> InspectedPackages;
 };

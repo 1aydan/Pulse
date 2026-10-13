@@ -18,6 +18,12 @@ struct FPulseMemoryAuditorConfig
 	/** Absolute by the time ApplySettingsDefaults finishes. Receives one timestamped subfolder per run. */
 	FString ReportDir;
 
+	/**
+	 * Assets to add as top-level whatever the settings say, by package or object path. Not limited to
+	 * the scan paths: naming an asset is the request. Filled by -inspect= and by the panel's drop target.
+	 */
+	TArray<FString> InspectAssets;
+
 	/** Exit code 1 when the baseline or any top-level asset exceeds a configured budget. */
 	bool bFailOverBudget = false;
 

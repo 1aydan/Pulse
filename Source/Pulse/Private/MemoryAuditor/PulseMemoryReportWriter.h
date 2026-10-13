@@ -30,6 +30,22 @@ public:
 	/** Absolute path of the run folder, valid after a successful Write. */
 	const FString& GetRunDir() const { return RunDir; }
 
+	/**
+	 * Writes a report on one top-level asset, for whoever is going to cut its references:
+	 *
+	 *   <ReportDir>/AssetReport_<Asset>_<timestamp>/
+	 *       Summary.md         totals and the biggest cuts, ready to paste into a ticket
+	 *       Dependencies.csv   every dependency, uncapped
+	 *
+	 * Cuts are ranked by what THIS asset's total would lose, from a dominator tree over its own
+	 * closure — not by the game-wide Unique, which reads zero for anything a map also loads even
+	 * though cutting it here still shrinks this asset.
+	 */
+	bool WriteAssetReport(const FPulseMemoryReport& Report, int32 RootIndex, FString& OutError);
+
+	/** Absolute path of the last asset report folder, valid after a successful WriteAssetReport. */
+	const FString& GetAssetReportDir() const { return AssetReportDir; }
+
 private:
 	bool WriteRootsCsv(const FPulseMemoryReport& Report, FString& OutError) const;
 	bool WriteDependenciesCsv(const FPulseMemoryReport& Report, FString& OutError) const;
@@ -41,6 +57,7 @@ private:
 
 	FString ReportDir;
 	FString RunDir;
+	FString AssetReportDir;
 	int32 MaxDependenciesPerRoot = 100;
 	int32 MaxHistoricalRuns = 0;
 };

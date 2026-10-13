@@ -8,6 +8,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
 #include "Engine/AssetManager.h"
+#include "Engine/Blueprint.h"
 #include "Engine/Level.h"
 #include "Engine/World.h"
 #include "GameMapsSettings.h"
@@ -84,9 +85,14 @@ void FPulseMemoryAnalyzer::GatherRoots(const IAssetRegistry& Registry, TArray<FR
 		FRootCandidate* Existing = ByPackage.Find(PackageName);
 		if (Existing == nullptr)
 		{
-			ByPackage.Add(PackageName, FRootCandidate{ PackageName, Kind, Detail });
+			ByPackage.Add(PackageName, FRootCandidate{ PackageName, Kind, Detail, Kind == EPulseMemoryRootKind::Inspected });
+			return;
 		}
-		else if (static_cast<uint8>(Kind) < static_cast<uint8>(Existing->Kind))
+
+		// An inspected asset keeps its stronger kind — a dropped map is still a map, and still a load
+		// root — but remembers that it was asked for so the panel can pin it.
+		Existing->bInspected |= Kind == EPulseMemoryRootKind::Inspected;
+		if (static_cast<uint8>(Kind) < static_cast<uint8>(Existing->Kind))
 		{
 			Existing->Kind = Kind;
 			Existing->Detail = Detail;
@@ -145,6 +151,41 @@ void FPulseMemoryAnalyzer::GatherRoots(const IAssetRegistry& Registry, TArray<FR
 		{
 			AddAssetsOfClass(ClassPath.GetAssetPath(), EPulseMemoryRootKind::Configured, ClassPath.GetAssetName());
 		}
+	}
+
+	if (Config.Roots.bIncludeBlueprints)
+	{
+		FARFilter Filter;
+		Filter.ClassPaths.Add(UBlueprint::StaticClass()->GetClassPathName());
+		Filter.bRecursiveClasses = true;
+		Filter.bRecursivePaths = true;
+		for (const FString& Path : Config.PathFilter)
+		{
+			Filter.PackagePaths.Add(FName(*Path));
+		}
+
+		TArray<FAssetData> Blueprints;
+		Registry.GetAssets(Filter, Blueprints);
+		for (const FAssetData& Blueprint : Blueprints)
+		{
+			// Editor Utility Blueprints and Widgets are tooling and never ship. Matched by name because
+			// their classes live in Blutility, which a runtime-facing audit should not depend on.
+			const FString ClassName = Blueprint.AssetClassPath.GetAssetName().ToString();
+			if (ClassName.StartsWith(TEXT("EditorUtility")) || !IsInScanScope(Blueprint.PackageName))
+			{
+				continue;
+			}
+			AddCandidate(Blueprint.PackageName, EPulseMemoryRootKind::Blueprint, ClassName);
+		}
+	}
+
+	// Inspected assets skip the scope check: naming one is the request, wherever it lives.
+	for (const FString& Path : Config.InspectAssets)
+	{
+		const FName PackageName = Path.Contains(TEXT("."))
+			? FSoftObjectPath(Path).GetLongPackageFName()
+			: FName(*Path);
+		AddCandidate(PackageName, EPulseMemoryRootKind::Inspected, TEXT("Inspected"));
 	}
 
 	if (Config.Roots.bIncludePrimaryAssets)
@@ -334,128 +375,47 @@ void FPulseMemoryAnalyzer::ExpandNode(const IAssetRegistry& Registry, int32 Node
 
 void FPulseMemoryAnalyzer::ComputeRetained(FPulseMemoryReport& Report)
 {
-	// Cooper, Harvey & Kennedy, "A Simple, Fast Dominance Algorithm". A virtual root (index N) points
-	// at every top-level asset, so a package's immediate dominator is the closest node every load path
-	// to it passes through. Its retained cost is then its subtree in the dominator tree: what would
-	// leave memory if that one package stopped loading.
-	const int32 NumNodes = Report.Nodes.Num();
-	const int32 VirtualRoot = NumNodes;
-
-	TArray<int32> RootSuccessors;
+	// Two trees, because one would let the question change the answer. With every Blueprint as a root,
+	// anything a map shares with some Blueprint becomes reachable around the map, stops being dominated
+	// by it, and drops out of the map's Unique — the map's cost would depend on how many Blueprints
+	// happen to be listed. So load roots are measured alone, and the tree that adds inspection roots is
+	// consulted only for packages no load root reaches at all.
+	TArray<int32> LoadRoots;
+	TArray<int32> AllRoots;
 	for (const FPulseMemoryRoot& Root : Report.Roots)
 	{
-		RootSuccessors.AddUnique(Root.NodeIndex);
+		if (PulseIsLoadRootKind(Root.Kind))
+		{
+			LoadRoots.AddUnique(Root.NodeIndex);
+		}
+		AllRoots.AddUnique(Root.NodeIndex);
 	}
 
-	auto GetSuccessors = [&Report, &RootSuccessors, VirtualRoot](int32 Node) -> const TArray<int32>&
-	{
-		return Node == VirtualRoot ? RootSuccessors : Report.Nodes[Node].HardDependencies;
-	};
+	TArray<FPulseMemoryCost> LoadRetained;
+	TBitArray<> LoadReachable;
+	Report.ComputeRetainedFrom(LoadRoots, LoadRetained, LoadReachable);
 
-	// Iterative DFS for a postorder: a deep reference chain must not be able to overflow the stack.
-	TArray<int32> PostOrderNumber;
-	PostOrderNumber.Init(INDEX_NONE, NumNodes + 1);
-	TArray<int32> PostOrder;
-	PostOrder.Reserve(NumNodes + 1);
+	TArray<FPulseMemoryCost> AllRetained;
+	TBitArray<> AllReachable;
+	if (AllRoots.Num() > LoadRoots.Num())
 	{
-		TBitArray<> Discovered(false, NumNodes + 1);
-		TArray<TPair<int32, int32>> Stack;
-		Stack.Emplace(VirtualRoot, 0);
-		Discovered[VirtualRoot] = true;
-		while (Stack.Num() > 0)
-		{
-			TPair<int32, int32>& Top = Stack.Last();
-			const TArray<int32>& Successors = GetSuccessors(Top.Key);
-			if (Top.Value < Successors.Num())
-			{
-				const int32 Next = Successors[Top.Value++];
-				if (!Discovered[Next])
-				{
-					Discovered[Next] = true;
-					Stack.Emplace(Next, 0);
-				}
-			}
-			else
-			{
-				PostOrderNumber[Top.Key] = PostOrder.Num();
-				PostOrder.Add(Top.Key);
-				Stack.Pop(EAllowShrinking::No);
-			}
-		}
+		Report.ComputeRetainedFrom(AllRoots, AllRetained, AllReachable);
 	}
 
-	// Predecessors, restricted to reachable nodes.
-	TArray<TArray<int32>> Predecessors;
-	Predecessors.SetNum(NumNodes + 1);
-	for (const int32 Node : PostOrder)
+	for (int32 NodeIndex = 0; NodeIndex < Report.Nodes.Num(); ++NodeIndex)
 	{
-		for (const int32 Successor : GetSuccessors(Node))
+		FPulseMemoryNode& Node = Report.Nodes[NodeIndex];
+		if (LoadReachable[NodeIndex])
 		{
-			Predecessors[Successor].Add(Node);
+			Node.Retained = LoadRetained[NodeIndex];
 		}
-	}
-
-	TArray<int32> ImmediateDominator;
-	ImmediateDominator.Init(INDEX_NONE, NumNodes + 1);
-	ImmediateDominator[VirtualRoot] = VirtualRoot;
-
-	auto Intersect = [&ImmediateDominator, &PostOrderNumber](int32 Left, int32 Right)
-	{
-		while (Left != Right)
+		else if (AllReachable.Num() > 0 && AllReachable[NodeIndex])
 		{
-			while (PostOrderNumber[Left] < PostOrderNumber[Right])
-			{
-				Left = ImmediateDominator[Left];
-			}
-			while (PostOrderNumber[Right] < PostOrderNumber[Left])
-			{
-				Right = ImmediateDominator[Right];
-			}
+			Node.Retained = AllRetained[NodeIndex];
 		}
-		return Left;
-	};
-
-	bool bChanged = true;
-	while (bChanged)
-	{
-		bChanged = false;
-		// Reverse postorder, skipping the virtual root, which is last in postorder.
-		for (int32 Position = PostOrder.Num() - 2; Position >= 0; --Position)
+		else
 		{
-			const int32 Node = PostOrder[Position];
-			int32 NewDominator = INDEX_NONE;
-			for (const int32 Predecessor : Predecessors[Node])
-			{
-				if (ImmediateDominator[Predecessor] == INDEX_NONE)
-				{
-					continue;
-				}
-				NewDominator = NewDominator == INDEX_NONE ? Predecessor : Intersect(Predecessor, NewDominator);
-			}
-			if (NewDominator != INDEX_NONE && ImmediateDominator[Node] != NewDominator)
-			{
-				ImmediateDominator[Node] = NewDominator;
-				bChanged = true;
-			}
-		}
-	}
-
-	// A node's dominator is always its DFS ancestor and so later in postorder: walking postorder
-	// forward finishes every subtree before its total is pushed up to the parent.
-	for (FPulseMemoryNode& Node : Report.Nodes)
-	{
-		Node.Retained = Node.Self;
-	}
-	for (const int32 Node : PostOrder)
-	{
-		if (Node == VirtualRoot)
-		{
-			continue;
-		}
-		const int32 Dominator = ImmediateDominator[Node];
-		if (Dominator != INDEX_NONE && Dominator != VirtualRoot)
-		{
-			Report.Nodes[Dominator].Retained += Report.Nodes[Node].Retained;
+			Node.Retained = Node.Self;
 		}
 	}
 }
@@ -508,6 +468,7 @@ bool FPulseMemoryAnalyzer::Run(FPulseMemoryReport& OutReport, FString& OutError,
 		Root.NodeIndex = NodeIndex;
 		Root.Kind = Candidate.Kind;
 		Root.KindDetail = Candidate.Detail;
+		Root.bInspected = Candidate.bInspected;
 	}
 
 	if (OutReport.Roots.Num() == 0)
@@ -548,7 +509,13 @@ bool FPulseMemoryAnalyzer::Run(FPulseMemoryReport& OutReport, FString& OutError,
 			if (Slot < Reach.NumHard)
 			{
 				Root.Total += Node.Self;
-				Node.NumRootsReaching++;
+				Node.bReachedByHardReference = true;
+				// Only load roots count here: "loaded by 40 Blueprints" would say nothing about how
+				// widely the game actually loads a package.
+				if (PulseIsLoadRootKind(Root.Kind))
+				{
+					Node.NumRootsReaching++;
+				}
 				if (Root.Kind == EPulseMemoryRootKind::AlwaysLoaded)
 				{
 					Node.bInBaseline = true;
@@ -612,7 +579,7 @@ bool FPulseMemoryAnalyzer::Run(FPulseMemoryReport& OutReport, FString& OutError,
 			OutReport.Baseline += Node.Self;
 			OutReport.NumBaselinePackages++;
 		}
-		if (Node.NumRootsReaching > 0)
+		if (Node.bReachedByHardReference)
 		{
 			OutReport.NumReachablePackages++;
 		}

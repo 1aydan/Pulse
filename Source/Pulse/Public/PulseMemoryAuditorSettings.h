@@ -60,6 +60,15 @@ struct FPulseMemoryRootSettings
 	bool bIncludePrimaryAssets = true;
 
 	/**
+	 * Every Blueprint under the scan paths, Widget and Anim Blueprints included, so a character or a
+	 * widget can be ranked by what it drags in even though only a reference ever loads it. Editor
+	 * Utility Blueprints never ship and are skipped. Listing these does not change any map's or
+	 * primary asset's Unique cost.
+	 */
+	UPROPERTY(EditAnywhere, Config, Category = "Roots")
+	bool bIncludeBlueprints = true;
+
+	/**
 	 * Treats the global default GameMode and the GameInstance class from Maps & Modes as always
 	 * loaded. Their hard references — pawn, controller, HUD — are resident in every map, so this is
 	 * usually the most important set in the report.
@@ -76,8 +85,8 @@ struct FPulseMemoryRootSettings
 	TArray<FSoftObjectPath> AlwaysLoadedAssets;
 
 	/**
-	 * Makes every asset of these classes under the scan paths top-level, e.g. /Script/Engine.Blueprint
-	 * to rank every Blueprint by what loading it drags in. Subclasses are included.
+	 * Makes every asset of these classes under the scan paths top-level, e.g. a data asset class to
+	 * rank every item definition by what loading it drags in. Subclasses are included.
 	 */
 	UPROPERTY(EditAnywhere, Config, Category = "Roots", meta = (AllowAbstract))
 	TArray<FSoftClassPath> AdditionalRootClasses;

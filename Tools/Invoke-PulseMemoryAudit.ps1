@@ -31,6 +31,10 @@
     Package paths top-level assets are taken from (e.g. /Game/Maps). Dependencies are followed
     wherever they lead. Default: the auditor's ScanPaths in DefaultPulse.ini.
 
+.PARAMETER Inspect
+    Assets to add as top-level whatever the settings say (e.g. /Game/Characters/BP_Player), each of
+    which also gets an AssetReport_<Asset>_<timestamp> folder ranking its biggest cuts.
+
 .PARAMETER ReportDir
     Overrides the report directory.
 
@@ -45,6 +49,9 @@
     .\Invoke-PulseMemoryAudit.ps1 -ProjectFile F:\Work\MyGame\MyGame.uproject
 .EXAMPLE
     .\Invoke-PulseMemoryAudit.ps1 -ProjectFile F:\Work\MyGame\MyGame.uproject -Path /Game/Maps -FailOverBudget
+.EXAMPLE
+    # Report on one character's dependencies, ranked by what cutting each would save.
+    .\Invoke-PulseMemoryAudit.ps1 -ProjectFile F:\Work\MyGame\MyGame.uproject -Inspect /Game/Characters/BP_Player
 #>
 [CmdletBinding()]
 param(
@@ -52,6 +59,7 @@ param(
     [string]$ProjectFile,
     [string]$EnginePath,
     [string[]]$Path,
+    [string[]]$Inspect,
     [string]$ReportDir,
     [switch]$NoSoft,
     [switch]$FailOverBudget
@@ -123,6 +131,7 @@ $CommandletArgs = @(
     '-unattended', '-nosplash', '-nop4', '-nullrhi'
 )
 if ($Path) { $CommandletArgs += "-path=$($Path -join ',')" }
+if ($Inspect) { $CommandletArgs += "-inspect=$($Inspect -join ',')" }
 if ($ReportDir) { $CommandletArgs += "-reportdir=$ReportDir" }
 if ($NoSoft) { $CommandletArgs += '-nosoft' }
 if ($FailOverBudget) { $CommandletArgs += '-failoverbudget' }

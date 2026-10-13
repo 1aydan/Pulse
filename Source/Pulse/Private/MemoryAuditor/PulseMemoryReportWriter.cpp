@@ -6,6 +6,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "PulseCsvWriter.h"
+#include "PulseMemoryEstimator.h"
 #include "PulseMemoryResult.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -102,7 +103,7 @@ bool FPulseMemoryReportWriter::WriteRootsCsv(const FPulseMemoryReport& Report, F
 		TEXT("UniqueRAMBytes"), TEXT("UniqueVRAMBytes"), TEXT("UniqueStreamingBytes"),
 		TEXT("MayLoadRAMBytes"), TEXT("MayLoadVRAMBytes"), TEXT("MayLoadStreamingBytes"),
 		TEXT("HardPackages"), TEXT("SoftOnlyPackages"), TEXT("ResidentBytesFromDiskSize"), TEXT("UnknownSizePackages"),
-		TEXT("OverBudget")
+		TEXT("OverBudget"), TEXT("Inspected")
 	});
 
 	for (const int32 RootIndex : PulseSortRootsByResidentCost(Report))
@@ -129,7 +130,8 @@ bool FPulseMemoryReportWriter::WriteRootsCsv(const FPulseMemoryReport& Report, F
 			FString::FromInt(Root.NumSoftOnlyPackages),
 			PulseFormatInt(Root.ResidentBytesFromDiskSize),
 			FString::FromInt(Root.NumUnknownSize),
-			PulseFormatBool(Report.IsRootOverBudget(Root))
+			PulseFormatBool(Report.IsRootOverBudget(Root)),
+			PulseFormatBool(Root.bInspected)
 		});
 	}
 
@@ -142,7 +144,7 @@ bool FPulseMemoryReportWriter::WriteDependenciesCsv(const FPulseMemoryReport& Re
 	Csv.WriteRow({
 		TEXT("Root"), TEXT("Dependency"), TEXT("AssetPath"), TEXT("Class"), TEXT("Hard"), TEXT("Depth"),
 		TEXT("RAMBytes"), TEXT("VRAMBytes"), TEXT("StreamingBytes"),
-		TEXT("RetainedRAMBytes"), TEXT("RetainedVRAMBytes"), TEXT("RootsReaching"),
+		TEXT("RetainedRAMBytes"), TEXT("RetainedVRAMBytes"), TEXT("LoadRootsReaching"),
 		TEXT("SizeSource"), TEXT("SizeNote"), TEXT("Via"), TEXT("Referencers"), TEXT("ReferencedBy")
 	});
 
@@ -213,7 +215,7 @@ bool FPulseMemoryReportWriter::WriteAssetsCsv(const FPulseMemoryReport& Report, 
 		TEXT("Asset"), TEXT("AssetPath"), TEXT("Class"),
 		TEXT("RAMBytes"), TEXT("VRAMBytes"), TEXT("StreamingBytes"),
 		TEXT("RetainedRAMBytes"), TEXT("RetainedVRAMBytes"), TEXT("RetainedStreamingBytes"),
-		TEXT("RootsReaching"), TEXT("InBaseline"), TEXT("SizeSource"), TEXT("SizeNote")
+		TEXT("LoadRootsReaching"), TEXT("InBaseline"), TEXT("SizeSource"), TEXT("SizeNote")
 	});
 
 	// Only what something actually loads. Packages reached purely through soft references are in
@@ -221,7 +223,7 @@ bool FPulseMemoryReportWriter::WriteAssetsCsv(const FPulseMemoryReport& Report, 
 	TArray<int32> Order;
 	for (int32 NodeIndex = 0; NodeIndex < Report.Nodes.Num(); ++NodeIndex)
 	{
-		if (Report.Nodes[NodeIndex].NumRootsReaching > 0)
+		if (Report.Nodes[NodeIndex].bReachedByHardReference)
 		{
 			Order.Add(NodeIndex);
 		}
@@ -267,7 +269,7 @@ bool FPulseMemoryReportWriter::WriteRunJson(const FPulseMemoryReport& Report, FS
 	};
 
 	int32 NumRootsOverBudget = 0;
-	int32 NumByKind[4] = { 0, 0, 0, 0 };
+	int32 NumByKind[static_cast<uint8>(EPulseMemoryRootKind::Count)] = {};
 	for (const FPulseMemoryRoot& Root : Report.Roots)
 	{
 		NumRootsOverBudget += Report.IsRootOverBudget(Root) ? 1 : 0;
@@ -277,7 +279,7 @@ bool FPulseMemoryReportWriter::WriteRunJson(const FPulseMemoryReport& Report, FS
 	int32 NumBySource[3] = { 0, 0, 0 };
 	for (const FPulseMemoryNode& Node : Report.Nodes)
 	{
-		if (Node.NumRootsReaching > 0)
+		if (Node.bReachedByHardReference)
 		{
 			NumBySource[static_cast<uint8>(Node.SizeSource)]++;
 		}
@@ -305,8 +307,10 @@ bool FPulseMemoryReportWriter::WriteRunJson(const FPulseMemoryReport& Report, FS
 	Writer->WriteValue(TEXT("roots"), Report.Roots.Num());
 	Writer->WriteValue(TEXT("alwaysLoadedRoots"), NumByKind[static_cast<uint8>(EPulseMemoryRootKind::AlwaysLoaded)]);
 	Writer->WriteValue(TEXT("mapRoots"), NumByKind[static_cast<uint8>(EPulseMemoryRootKind::Map)]);
-	Writer->WriteValue(TEXT("configuredRoots"), NumByKind[static_cast<uint8>(EPulseMemoryRootKind::Configured)]);
 	Writer->WriteValue(TEXT("primaryAssetRoots"), NumByKind[static_cast<uint8>(EPulseMemoryRootKind::PrimaryAsset)]);
+	Writer->WriteValue(TEXT("configuredRoots"), NumByKind[static_cast<uint8>(EPulseMemoryRootKind::Configured)]);
+	Writer->WriteValue(TEXT("blueprintRoots"), NumByKind[static_cast<uint8>(EPulseMemoryRootKind::Blueprint)]);
+	Writer->WriteValue(TEXT("inspectedRoots"), NumByKind[static_cast<uint8>(EPulseMemoryRootKind::Inspected)]);
 	Writer->WriteValue(TEXT("rootsOverBudget"), NumRootsOverBudget);
 	Writer->WriteValue(TEXT("packagesInGraph"), Report.Nodes.Num());
 	Writer->WriteValue(TEXT("packagesReachedByHardReference"), Report.NumReachablePackages);
@@ -318,6 +322,7 @@ bool FPulseMemoryReportWriter::WriteRunJson(const FPulseMemoryReport& Report, FS
 	Writer->WriteObjectStart(TEXT("roots"));
 	Writer->WriteValue(TEXT("includeMaps"), Report.RootSettings.bIncludeMaps);
 	Writer->WriteValue(TEXT("includePrimaryAssets"), Report.RootSettings.bIncludePrimaryAssets);
+	Writer->WriteValue(TEXT("includeBlueprints"), Report.RootSettings.bIncludeBlueprints);
 	Writer->WriteValue(TEXT("includeGameMapsSettings"), Report.RootSettings.bIncludeGameMapsSettings);
 	Writer->WriteArrayStart(TEXT("alwaysLoadedAssets"));
 	for (const FSoftObjectPath& Path : Report.RootSettings.AlwaysLoadedAssets)
@@ -364,6 +369,187 @@ bool FPulseMemoryReportWriter::WriteRunJson(const FPulseMemoryReport& Report, FS
 	if (!FFileHelper::SaveStringToFile(Json, *Path, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 	{
 		OutError = FString::Printf(TEXT("Failed to write %s"), *Path);
+		return false;
+	}
+	return true;
+}
+
+/** Markdown table cells must not contain a bare pipe or a line break. */
+static FString PulseMarkdownCell(const FString& Text)
+{
+	return Text.Replace(TEXT("|"), TEXT("\\|")).Replace(TEXT("\n"), TEXT(" "));
+}
+
+/** Folder-safe version of an asset name. */
+static FString PulseSanitizeFileName(const FString& Name)
+{
+	FString Sanitized;
+	for (const TCHAR Char : Name)
+	{
+		Sanitized.AppendChar(FChar::IsAlnum(Char) || Char == TEXT('_') || Char == TEXT('-') ? Char : TEXT('_'));
+	}
+	return Sanitized.IsEmpty() ? TEXT("Asset") : Sanitized;
+}
+
+bool FPulseMemoryReportWriter::WriteAssetReport(const FPulseMemoryReport& Report, int32 RootIndex, FString& OutError)
+{
+	if (!Report.Roots.IsValidIndex(RootIndex))
+	{
+		OutError = TEXT("No such top-level asset in this report.");
+		return false;
+	}
+
+	const FPulseMemoryRoot& Root = Report.Roots[RootIndex];
+	const FPulseMemoryNode& RootNode = Report.Nodes[Root.NodeIndex];
+
+	AssetReportDir = ReportDir / FString::Printf(TEXT("AssetReport_%s_%s"), *PulseSanitizeFileName(RootNode.AssetName), *Report.GeneratedAtUtc);
+	IFileManager::Get().MakeDirectory(*AssetReportDir, /*Tree*/ true);
+	if (!IFileManager::Get().DirectoryExists(*AssetReportDir))
+	{
+		OutError = FString::Printf(TEXT("Failed to create report directory %s"), *AssetReportDir);
+		return false;
+	}
+
+	FPulseMemoryReach Reach;
+	Report.ComputeReach(Root.NodeIndex, Report.Estimation.bIncludeSoftReferences, Reach);
+	TArray<TArray<int32>> ReferencerSlots;
+	Report.CollectReferencers(Reach, ReferencerSlots);
+
+	// The saving for cutting a dependency out of THIS asset: its subtree in a dominator tree rooted at
+	// the asset alone. Removing every reference to it removes it and everything only it brought in.
+	TArray<FPulseMemoryCost> Saving;
+	TBitArray<> Covered;
+	Report.ComputeRetainedFrom({ Root.NodeIndex }, Saving, Covered);
+
+	TArray<int32> HardSlots;
+	for (int32 Slot = 1; Slot < Reach.NumHard; ++Slot)
+	{
+		HardSlots.Add(Slot);
+	}
+	HardSlots.Sort([&](int32 Left, int32 Right)
+	{
+		const int64 LeftSaving = Saving[Reach.Nodes[Left]].GetResidentBytes();
+		const int64 RightSaving = Saving[Reach.Nodes[Right]].GetResidentBytes();
+		if (LeftSaving != RightSaving)
+		{
+			return LeftSaving > RightSaving;
+		}
+		return PulseNodeLess(Report, Reach.Nodes[Left], Reach.Nodes[Right]);
+	});
+
+	// ---- Dependencies.csv: everything, hard first by saving, then may-load ----------------------
+	FPulseCsvWriter Csv;
+	Csv.WriteRow({
+		TEXT("Dependency"), TEXT("AssetPath"), TEXT("Class"), TEXT("Hard"), TEXT("Depth"),
+		TEXT("SavesRAMBytes"), TEXT("SavesVRAMBytes"), TEXT("SavesStreamingBytes"),
+		TEXT("OwnRAMBytes"), TEXT("OwnVRAMBytes"), TEXT("OwnStreamingBytes"),
+		TEXT("Referencers"), TEXT("ReferencedBy"), TEXT("Via"), TEXT("SizeSource"), TEXT("SizeNote")
+	});
+
+	auto WriteDependencyRow = [&](int32 Slot, bool bHard)
+	{
+		const int32 NodeIndex = Reach.Nodes[Slot];
+		const FPulseMemoryNode& Node = Report.Nodes[NodeIndex];
+		// A may-load entry is not loaded, so cutting it saves nothing resident; its own cost is the
+		// figure that matters for it.
+		const FPulseMemoryCost Saves = bHard ? Saving[NodeIndex] : FPulseMemoryCost();
+		Csv.WriteRow({
+			Node.AssetName,
+			Node.ObjectPath.IsEmpty() ? Node.PackageName.ToString() : Node.ObjectPath,
+			Node.ClassName,
+			PulseFormatBool(bHard),
+			FString::FromInt(Reach.Depths[Slot]),
+			PulseFormatInt(Saves.RAMBytes),
+			PulseFormatInt(Saves.VRAMBytes),
+			PulseFormatInt(Saves.StreamingBytes),
+			PulseFormatInt(Node.Self.RAMBytes),
+			PulseFormatInt(Node.Self.VRAMBytes),
+			PulseFormatInt(Node.Self.StreamingBytes),
+			FString::FromInt(ReferencerSlots[Slot].Num()),
+			Report.FormatReferencers(Reach, ReferencerSlots[Slot], /*MaxNames*/ 0),
+			Report.BuildViaPath(Reach, Slot),
+			PulseMemorySizeSourceToString(Node.SizeSource),
+			Node.SizeNote
+		});
+	};
+
+	for (const int32 Slot : HardSlots)
+	{
+		WriteDependencyRow(Slot, /*bHard*/ true);
+	}
+	TArray<int32> SoftSlots;
+	for (int32 Slot = Reach.NumHard; Slot < Reach.Nodes.Num(); ++Slot)
+	{
+		SoftSlots.Add(Slot);
+	}
+	SoftSlots.Sort([&](int32 Left, int32 Right) { return PulseNodeLess(Report, Reach.Nodes[Left], Reach.Nodes[Right]); });
+	for (const int32 Slot : SoftSlots)
+	{
+		WriteDependencyRow(Slot, /*bHard*/ false);
+	}
+
+	if (!Csv.SaveToFile(AssetReportDir / TEXT("Dependencies.csv"), OutError))
+	{
+		return false;
+	}
+
+	// ---- Summary.md -------------------------------------------------------------------------------
+	TStringBuilder<16384> Md;
+	Md.Appendf(TEXT("# Memory report: %s\n\n"), *RootNode.AssetName);
+	// Kind only when it adds something: a Blueprint root is already described by its class.
+	const FString KindName = PulseMemoryRootKindToString(Root.Kind);
+	Md.Appendf(TEXT("`%s` (%s%s%s)\n\n"), *RootNode.ObjectPath, *RootNode.ClassName,
+		KindName == RootNode.ClassName || Root.Kind == EPulseMemoryRootKind::Blueprint || Root.Kind == EPulseMemoryRootKind::Inspected
+			? TEXT("") : *FString::Printf(TEXT(", %s"), *KindName),
+		Root.bInspected ? TEXT(", inspected") : TEXT(""));
+	Md.Append(TEXT("Estimated from Asset Registry tags by Pulse, without loading anything. Use the figures to decide what to cut first, not as an exact budget.\n\n"));
+
+	Md.Append(TEXT("| | RAM | VRAM | Streaming |\n|---|---:|---:|---:|\n"));
+	auto CostRow = [&Md](const TCHAR* Label, const FPulseMemoryCost& Cost)
+	{
+		Md.Appendf(TEXT("| %s | %s | %s | %s |\n"), Label,
+			*PulseFormatBytes(Cost.RAMBytes), *PulseFormatBytes(Cost.VRAMBytes), *PulseFormatBytes(Cost.StreamingBytes));
+	};
+	CostRow(TEXT("**Total**: everything it hard-references"), Root.Total);
+	CostRow(TEXT("**Unique**: leaves memory if nothing loads it"), Root.Unique);
+	CostRow(TEXT("**May load**: through soft references only"), Root.MayLoad);
+	Md.Appendf(TEXT("\n%d packages load with it; %d more are reachable only softly.\n\n"), Root.NumHardPackages, Root.NumSoftOnlyPackages);
+
+	Md.Append(TEXT("## Biggest cuts\n\n"));
+	Md.Append(TEXT("**Saves** is how much this asset's total drops if the dependency stops loading: remove or soften every reference in **Referenced by**, and it goes, along with everything only it brought in. "));
+	Md.Append(TEXT("Cutting only the chain shown is not enough when there is more than one referencer. Streaming bytes are left out of the ranking because they are not held resident.\n\n"));
+	Md.Append(TEXT("| # | Dependency | Class | Saves RAM | Saves VRAM | Referenced by | Shortest chain |\n|---:|---|---|---:|---:|---|---|\n"));
+
+	int32 Rank = 0;
+	for (const int32 Slot : HardSlots)
+	{
+		const int32 NodeIndex = Reach.Nodes[Slot];
+		const FPulseMemoryCost& Saves = Saving[NodeIndex];
+		if (Saves.GetResidentBytes() <= 0 || ++Rank > 30)
+		{
+			break;
+		}
+		const FPulseMemoryNode& Node = Report.Nodes[NodeIndex];
+		Md.Appendf(TEXT("| %d | %s | %s | %s | %s | %s | %s |\n"),
+			Rank,
+			*PulseMarkdownCell(Node.AssetName),
+			*PulseMarkdownCell(Node.ClassName),
+			*PulseFormatBytes(Saves.RAMBytes),
+			*PulseFormatBytes(Saves.VRAMBytes),
+			*PulseMarkdownCell(Report.FormatReferencers(Reach, ReferencerSlots[Slot], /*MaxNames*/ 6)),
+			*PulseMarkdownCell(Report.BuildViaPath(Reach, Slot)));
+	}
+	if (Rank == 0)
+	{
+		Md.Append(TEXT("| | Nothing to cut: no dependency holds resident memory. | | | | | |\n"));
+	}
+
+	Md.Append(TEXT("\nThe full list, may-load references included, is in `Dependencies.csv` next to this file.\n"));
+
+	const FString SummaryPath = AssetReportDir / TEXT("Summary.md");
+	if (!FFileHelper::SaveStringToFile(FString(Md.ToView()), *SummaryPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+	{
+		OutError = FString::Printf(TEXT("Failed to write %s"), *SummaryPath);
 		return false;
 	}
 	return true;

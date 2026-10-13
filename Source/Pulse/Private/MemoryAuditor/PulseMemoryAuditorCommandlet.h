@@ -10,7 +10,11 @@
  * Ranks every top-level asset in a project by the memory its hard references keep resident.
  *
  *   UnrealEditor-Cmd.exe <Project>.uproject -run=Pulse.PulseMemoryAuditor -unattended -nullrhi
- *       [-path=/Game/Maps,/Game/Core] [-reportdir=<dir>] [-nosoft] [-failoverbudget]
+ *       [-path=/Game/Maps,/Game/Core] [-inspect=/Game/Characters/BP_Player,...] [-reportdir=<dir>]
+ *       [-nosoft] [-failoverbudget]
+ *
+ * Each -inspect= asset also gets an AssetReport_<Asset>_<timestamp> folder: its biggest cuts, ranked
+ * by how much they save it.
  *
  * Registry-only: no package is loaded, so -nullrhi is fine and a whole project takes seconds.
  *

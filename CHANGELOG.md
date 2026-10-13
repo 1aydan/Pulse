@@ -3,6 +3,40 @@
 All notable changes to Pulse are recorded here. Versions follow the `VersionName` field in
 `Pulse.uplugin`.
 
+## 0.4.0
+
+### Added
+
+- **Inspect an asset**: drag one or more assets from the Content Browser onto the Memory Auditor, or
+  right-click any row and choose **Inspect**. The analysis re-runs with them as top-level assets,
+  pinned above the ranking and expanded, whatever the filters say. **Stop Inspecting** removes one;
+  `-inspect=` does the same from the commandlet.
+- **Export Asset Report** on any top-level row's context menu writes
+  `AssetReport_<Asset>_<timestamp>/` with `Summary.md` (totals and the 30 biggest cuts, ready for a
+  ticket) and an uncapped `Dependencies.csv`, then opens the folder. Cuts are ranked by **Saves**:
+  how much that asset's own total drops if a dependency stops loading, from a dominator tree over
+  its closure — not the game-wide Unique, which reads zero for anything a map also loads. Each cut
+  lists every package that references it, since all of them have to let go. The commandlet writes
+  one for each `-inspect=` asset.
+- **Blueprints as top-level assets** (`bIncludeBlueprints`, on by default): every Blueprint under the
+  scan paths, Widget and Anim Blueprints included, so a character like `BP_Player` gets its own row.
+  Editor Utility Blueprints are skipped. A **Blueprints** filter hides them.
+- **Clear** button: drops the results and every inspected asset.
+- `-Inspect` on `Tools/Invoke-PulseMemoryAudit.ps1`.
+
+### Changed
+
+- Top-level assets are split into load roots (always-loaded, maps, primary assets) and question roots
+  (configured classes, Blueprints, inspected assets). Unique is computed over load roots only, with a
+  second pass for packages only a question root reaches, so listing every Blueprint leaves every
+  map's figures exactly as they were. Previously `AdditionalRootClasses` roots could shrink the Unique
+  of any map they shared dependencies with.
+- Reach on a dependency row, and `RootsReaching` (now `LoadRootsReaching`) in `Dependencies.csv` and
+  `Assets.csv`, count load roots only, so "loaded by 40" means what the game loads rather than how
+  many Blueprints were listed. `Assets.csv` now includes packages only a question root reaches.
+- `Roots.csv` gains an `Inspected` column; `Run.json` gains `blueprintRoots`, `inspectedRoots` and
+  `includeBlueprints`.
+
 ## 0.3.0
 
 ### Changed

@@ -66,6 +66,23 @@ int32 UPulseMemoryAuditorCommandlet::Main(const FString& Params)
 		*PulseFormatBytes(Report.Baseline.RAMBytes), *PulseFormatBytes(Report.Baseline.VRAMBytes), Report.NumBaselinePackages);
 	UE_LOG(LogPulse, Display, TEXT("Reports written to %s"), *Writer.GetRunDir());
 
+	// An inspected asset was asked about by name, so it gets the same report the panel's right-click
+	// writes: the biggest cuts for that one asset, ready to hand to whoever will make them.
+	for (int32 RootIndex = 0; RootIndex < Report.Roots.Num(); ++RootIndex)
+	{
+		if (!Report.Roots[RootIndex].bInspected)
+		{
+			continue;
+		}
+		if (!Writer.WriteAssetReport(Report, RootIndex, Error))
+		{
+			UE_LOG(LogPulse, Error, TEXT("Asset report failed: %s"), *Error);
+			return 1;
+		}
+		UE_LOG(LogPulse, Display, TEXT("Asset report for %s written to %s"),
+			*Report.Nodes[Report.Roots[RootIndex].NodeIndex].AssetName, *Writer.GetAssetReportDir());
+	}
+
 	if (bBaselineOverBudget)
 	{
 		UE_LOG(LogPulse, Warning, TEXT("The always-loaded baseline exceeds its budget."));

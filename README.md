@@ -389,11 +389,18 @@ nothing is loaded — so a whole project takes seconds, and `-nullrhi` is fine.
 | **Always loaded** | The Maps & Modes default GameMode and GameInstance class, plus `AlwaysLoadedAssets`. Resident in every map |
 | **Map** | Every map under the scan paths |
 | **Primary asset** | Everything the Asset Manager lists under the scan paths |
-| **Configured** | Every asset of an `AdditionalRootClasses` class, e.g. `/Script/Engine.Blueprint` to rank every Blueprint |
+| **Configured** | Every asset of an `AdditionalRootClasses` class, e.g. a data asset class |
+| **Blueprint** | Every Blueprint under the scan paths, Widget and Anim Blueprints included (`bIncludeBlueprints`, on by default). Editor Utility Blueprints are skipped |
+| **Inspected** | Dropped on the panel, picked with right-click **Inspect**, or named with `-inspect=` |
 
-An asset that qualifies twice is listed once, under the first kind in that table. Dependencies are
-followed wherever they lead, including engine and plugin content; the scan paths only choose the
-top-level assets.
+An asset that qualifies twice is listed once, under the first kind in that table; an inspected asset
+that is also a map stays a map and is marked *(inspected)*. Dependencies are followed wherever they
+lead, including engine and plugin content; the scan paths only choose the top-level assets.
+
+The first three kinds are **load roots**: something other than a reference loads them. The rest are
+questions — "what would loading this Blueprint cost?" — about assets that normally load because
+something references them. Only load roots shape Unique and Reach, so listing every Blueprint does not
+change a single map's numbers.
 
 ### The numbers
 
@@ -401,15 +408,17 @@ top-level assets.
 |---|---|---|
 | **RAM / VRAM** | Everything it keeps resident: itself plus its whole hard-reference closure | The package itself |
 | **Unique RAM / VRAM** | What leaves memory if nothing loads it any more | The same, for that dependency |
-| **Reach** | Packages it loads | How many top-level assets load it |
+| **Reach** | Packages it loads | How many load roots (maps, primary assets, always-loaded) load it |
 | **Src** | Share of the total computed from tags rather than disk size | `Tags`, `Disk` or `?` |
 | **Via** | Why it is top-level | The shortest reference chain from the top-level asset, flagged `[+N other referencers]` when more than one package holds it |
 
 **Unique** is the column to act on. A Blueprint showing 800 MB total and 2 MB unique is fine: that
 memory is shared and would be loaded anyway. One showing 300 MB unique is the problem. Unique is the
 asset's retained size: its subtree in the dominator tree of the hard-reference graph, the same measure
-a heap profiler reports. It accounts for overlap between top-level assets, so a pawn that the GameMode
-also references still gets credit for what only the pawn pulls in.
+a heap profiler reports, computed over the load roots. It accounts for overlap between them, so a
+pawn that the GameMode references still gets credit for what only the pawn pulls in. A Blueprint or
+inspected asset that no load root reaches is measured in a second pass that adds the question roots,
+so it still gets a figure without moving anyone else's.
 
 The summary line reports the **baseline**: the union of what the always-loaded assets keep resident.
 That memory is paid in every map before the map loads anything, which makes it the most important
@@ -451,6 +460,7 @@ size came from.
 | Switch | Effect |
 |---|---|
 | `-path=/Game/A,/Game/B` | Take top-level assets only from these paths. Default: the auditor's `ScanPaths` |
+| `-inspect=/Game/A/BP_X,...` | Add these assets as top-level and write an asset report for each. Not limited to the scan paths |
 | `-reportdir=<dir>` | Override the report directory (default `Saved/Pulse/MemoryAuditor`) |
 | `-nosoft` | Skip soft references entirely (no *may load* rows) |
 | `-failoverbudget` | Exit 1 when the baseline or any top-level asset exceeds a configured budget |
@@ -458,6 +468,30 @@ size came from.
 Exit codes follow the other commandlets: 0 ran, 1 over budget with `-failoverbudget` (or a report
 could not be written), 2 bad invocation or nothing to analyse. `Tools/Invoke-PulseMemoryAudit.ps1`
 wraps it for CI.
+
+### Inspecting one asset
+
+The workflow for cutting a specific asset down:
+
+1. Open **Tools → Pulse → Memory Auditor**.
+2. Drag the asset in from the Content Browser (or right-click any row and choose **Inspect**). The
+   analysis re-runs with it as a top-level asset, pinned at the top of the list and expanded.
+3. Right-click it and choose **Export Asset Report**. The folder opens when it is written.
+4. Hand `Summary.md` to whoever is going to cut the references.
+
+```
+Saved/Pulse/MemoryAuditor/AssetReport_<Asset>_<timestamp>/
+    Summary.md         totals, then the 30 biggest cuts: what each saves, every referencer, the chain
+    Dependencies.csv   every dependency, uncapped, may-load included
+```
+
+The report ranks cuts by **Saves**: how much *this asset's* total drops if a dependency stops loading,
+from a dominator tree over the asset's own closure. That is a different question from the game-wide
+Unique. A texture a map also loads has zero game-wide Unique, yet cutting this asset's reference to it
+still shrinks this asset, and that is what someone trimming a character wants to see.
+
+**Clear** drops the results and every inspected asset. **Stop Inspecting** on a pinned row removes just
+that one. `-inspect=/Game/Characters/BP_Player` on the commandlet writes the same report for CI.
 
 ### Breaking a chain
 

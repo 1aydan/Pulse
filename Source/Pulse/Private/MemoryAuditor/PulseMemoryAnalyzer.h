@@ -35,6 +35,7 @@ private:
 		FName PackageName;
 		EPulseMemoryRootKind Kind = EPulseMemoryRootKind::PrimaryAsset;
 		FString Detail;
+		bool bInspected = false;
 	};
 
 	/** Every top-level candidate, deduplicated by package with the kind precedence applied. */
@@ -49,7 +50,10 @@ private:
 	/** Fills one node's hard and soft dependency lists, creating nodes for anything new. */
 	void ExpandNode(const IAssetRegistry& Registry, int32 NodeIndex, FPulseMemoryReport& Report, TArray<int32>& Queue) const;
 
-	/** Retained cost per node, from the dominator tree of the hard graph under a virtual root. */
+	/**
+	 * Retained cost per node. Load roots first, alone, so their numbers are what the game actually
+	 * loads; then load and inspection roots together, used only for packages no load root reaches.
+	 */
 	static void ComputeRetained(FPulseMemoryReport& Report);
 
 	const FPulseMemoryAuditorConfig Config;

@@ -6,15 +6,18 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
 #include "ContentBrowserModule.h"
+#include "DragAndDrop/AssetDragDropOp.h"
 #include "Editor.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "HAL/PlatformApplicationMisc.h"
+#include "HAL/PlatformProcess.h"
 #include "IContentBrowserSingleton.h"
 #include "ISettingsModule.h"
 #include "MemoryAuditor/PulseMemoryAnalyzer.h"
 #include "MemoryAuditor/PulseMemoryAuditorConfig.h"
 #include "MemoryAuditor/PulseMemoryEstimator.h"
 #include "MemoryAuditor/PulseMemoryReportWriter.h"
+#include "Misc/PackageName.h"
 #include "Misc/ScopedSlowTask.h"
 #include "Modules/ModuleManager.h"
 #include "Pulse.h"
@@ -51,14 +54,19 @@ static FText PulseBytesText(int64 Bytes)
 
 static FString PulseRootKindLabel(const FPulseMemoryRoot& Root)
 {
+	FString Label;
 	switch (Root.Kind)
 	{
-	case EPulseMemoryRootKind::AlwaysLoaded: return TEXT("Always loaded");
-	case EPulseMemoryRootKind::Map:          return Root.bWorldPartition ? TEXT("Map (WP)") : TEXT("Map");
-	case EPulseMemoryRootKind::Configured:   return TEXT("Configured");
-	case EPulseMemoryRootKind::PrimaryAsset: return FString::Printf(TEXT("Primary: %s"), *Root.KindDetail);
+	case EPulseMemoryRootKind::AlwaysLoaded: Label = TEXT("Always loaded"); break;
+	case EPulseMemoryRootKind::Map:          Label = Root.bWorldPartition ? TEXT("Map (WP)") : TEXT("Map"); break;
+	case EPulseMemoryRootKind::PrimaryAsset: Label = FString::Printf(TEXT("Primary: %s"), *Root.KindDetail); break;
+	case EPulseMemoryRootKind::Configured:   Label = TEXT("Configured"); break;
+	// KindDetail is the Blueprint's own class, so Widget and Anim Blueprints read as such.
+	case EPulseMemoryRootKind::Blueprint:    Label = Root.KindDetail; break;
+	case EPulseMemoryRootKind::Inspected:    return TEXT("Inspected");
+	case EPulseMemoryRootKind::Count:        break;
 	}
-	return FString();
+	return Root.bInspected ? FString::Printf(TEXT("%s (inspected)"), *Label) : Label;
 }
 
 /**
@@ -192,7 +200,7 @@ public:
 			const FPulseMemoryCost& Cost = Root != nullptr ? Root->Unique : Node.Retained;
 			return SNew(STextBlock)
 				.Text(PulseBytesText(ColumnName == GPulseMemColUniqueRAM ? Cost.RAMBytes : Cost.VRAMBytes))
-				.ToolTipText(LOCTEXT("UniqueCellTooltip", "Leaves memory if nothing loads this asset any more: itself plus everything only it keeps loaded."))
+				.ToolTipText(LOCTEXT("UniqueCellTooltip", "Leaves memory if nothing loads this asset any more: itself plus everything only it keeps loaded. Measured against what maps, primary assets and always-loaded assets load."))
 				.ColorAndOpacity(TextColor);
 		}
 
@@ -207,7 +215,7 @@ public:
 			}
 			return SNew(STextBlock)
 				.Text(FText::AsNumber(Node.NumRootsReaching))
-				.ToolTipText(FText::Format(LOCTEXT("ReachDepTooltip", "Loaded by {0} top-level asset(s). {1} hop(s) from this one."),
+				.ToolTipText(FText::Format(LOCTEXT("ReachDepTooltip", "Loaded by {0} map(s), primary asset(s) or always-loaded asset(s). {1} hop(s) from this one."),
 					FText::AsNumber(Node.NumRootsReaching), FText::AsNumber(Item->Depth)))
 				.ColorAndOpacity(TextColor);
 		}
@@ -304,6 +312,15 @@ void SPulseMemoryAuditorPanel::Construct(const FArguments& InArgs)
 		]
 
 		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(6.0f, 2.0f)
+		[
+			SNew(STextBlock)
+			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			.Text(LOCTEXT("DropHint", "Drag assets here from the Content Browser to inspect them, or right-click any row and choose Inspect."))
+		]
+
+		+ SVerticalBox::Slot()
 		.FillHeight(1.0f)
 		.Padding(4.0f)
 		[
@@ -335,6 +352,17 @@ TSharedRef<SWidget> SPulseMemoryAuditorPanel::BuildControlsRow()
 			.ToolTipText(LOCTEXT("ExportTooltip", "Write Roots.csv, Dependencies.csv, Assets.csv and Run.json, identical to the commandlet's output."))
 			.IsEnabled(this, &SPulseMemoryAuditorPanel::IsExportEnabled)
 			.OnClicked(this, &SPulseMemoryAuditorPanel::OnExportClicked)
+		]
+
+		+ SHorizontalBox::Slot()
+		.AutoWidth()
+		.Padding(2.0f)
+		[
+			SNew(SButton)
+			.Text(LOCTEXT("Clear", "Clear"))
+			.ToolTipText(LOCTEXT("ClearTooltip", "Clear the results and every inspected asset."))
+			.IsEnabled(this, &SPulseMemoryAuditorPanel::IsClearEnabled)
+			.OnClicked(this, &SPulseMemoryAuditorPanel::OnClearClicked)
 		]
 
 		+ SHorizontalBox::Slot()
@@ -381,6 +409,10 @@ TSharedRef<SWidget> SPulseMemoryAuditorPanel::BuildFilterRow()
 		+ SHorizontalBox::Slot().AutoWidth().Padding(6.0f, 2.0f).VAlign(VAlign_Center)
 		[
 			MakeKindToggle(EPulseMemoryRootKind::PrimaryAsset, LOCTEXT("KindPrimary", "Primary assets"))
+		]
+		+ SHorizontalBox::Slot().AutoWidth().Padding(6.0f, 2.0f).VAlign(VAlign_Center)
+		[
+			MakeKindToggle(EPulseMemoryRootKind::Blueprint, LOCTEXT("KindBlueprints", "Blueprints"))
 		]
 		+ SHorizontalBox::Slot().AutoWidth().Padding(6.0f, 2.0f).VAlign(VAlign_Center)
 		[
@@ -433,7 +465,7 @@ TSharedRef<SWidget> SPulseMemoryAuditorPanel::BuildResultsTree()
 			+ SortableColumn(GPulseMemColUniqueVRAM, LOCTEXT("ColUniqueVRAM", "Unique VRAM"),
 				LOCTEXT("ColUniqueVRAMTooltip", "Video memory that leaves if nothing loads this asset any more."), 0.08f)
 			+ SortableColumn(GPulseMemColReach, LOCTEXT("ColReach", "Reach"),
-				LOCTEXT("ColReachTooltip", "Top-level row: packages it loads. Dependency row: how many top-level assets load it."), 0.06f)
+				LOCTEXT("ColReachTooltip", "Top-level row: packages it loads. Dependency row: how many maps, primary assets and always-loaded assets load it. Blueprints and inspected assets are not counted, so this reflects what the game loads."), 0.06f)
 			+ SHeaderRow::Column(GPulseMemColSource).DefaultLabel(LOCTEXT("ColSource", "Src"))
 				.DefaultTooltip(LOCTEXT("ColSourceTooltip", "Where the size came from: registry tags, or editor disk size as a stand-in."))
 				.FillWidth(0.07f)
@@ -472,9 +504,19 @@ bool SPulseMemoryAuditorPanel::IsExportEnabled() const
 
 FReply SPulseMemoryAuditorPanel::OnRunClicked()
 {
+	RunAnalysis();
+	return FReply::Handled();
+}
+
+bool SPulseMemoryAuditorPanel::RunAnalysis()
+{
 	const UPulseMemoryAuditorSettings& Settings = *GetDefault<UPulseMemoryAuditorSettings>();
 	FPulseMemoryAuditorConfig Config;
 	Config.ApplySettingsDefaults(Settings);
+	for (const FName& PackageName : InspectedPackages)
+	{
+		Config.InspectAssets.Add(PackageName.ToString());
+	}
 
 	TSharedPtr<FPulseMemoryReport> NewReport = MakeShared<FPulseMemoryReport>();
 	FString Error;
@@ -498,13 +540,119 @@ FReply SPulseMemoryAuditorPanel::OnRunClicked()
 	{
 		StatusLine = FString::Printf(TEXT("Analysis stopped: %s"), *Error);
 		UE_LOG(LogPulse, Warning, TEXT("Pulse.Memory: %s"), *Error);
-		return FReply::Handled();
+		return false;
 	}
 
 	Report = NewReport;
 	RebuildRootItems();
 	StatusLine = FString::Printf(TEXT("Analyzed %d top-level assets. Expand one to see what it loads; double-click to browse, right-click for the Reference Viewer."),
 		Report->Roots.Num());
+	return true;
+}
+
+FReply SPulseMemoryAuditorPanel::OnClearClicked()
+{
+	Report.Reset();
+	AllRootItems.Reset();
+	VisibleRootItems.Reset();
+	InspectedPackages.Reset();
+	StatusLine = TEXT("Press Analyze to rank top-level assets by the memory they keep loaded.");
+	if (TreeView.IsValid())
+	{
+		TreeView->RequestTreeRefresh();
+	}
+	return FReply::Handled();
+}
+
+bool SPulseMemoryAuditorPanel::IsClearEnabled() const
+{
+	return Report.IsValid() || InspectedPackages.Num() > 0;
+}
+
+void SPulseMemoryAuditorPanel::InspectPackages(const TArray<FName>& PackageNames)
+{
+	if (PackageNames.Num() == 0)
+	{
+		return;
+	}
+	for (const FName& PackageName : PackageNames)
+	{
+		InspectedPackages.AddUnique(PackageName);
+	}
+
+	if (RunAnalysis())
+	{
+		FocusRootForPackage(PackageNames[0]);
+		if (PackageNames.Num() == 1)
+		{
+			StatusLine = FString::Printf(TEXT("Inspecting %s. Its dependencies are listed below; the row stays pinned at the top until you clear it."),
+				*FPackageName::GetShortName(PackageNames[0]));
+		}
+		else
+		{
+			StatusLine = FString::Printf(TEXT("Inspecting %d assets, pinned at the top until you clear them."), PackageNames.Num());
+		}
+	}
+}
+
+void SPulseMemoryAuditorPanel::FocusRootForPackage(FName PackageName)
+{
+	if (!Report.IsValid() || !TreeView.IsValid())
+	{
+		return;
+	}
+
+	for (const TSharedPtr<FPulseMemoryTreeItem>& Item : VisibleRootItems)
+	{
+		if (Report->Nodes[Item->NodeIndex].PackageName == PackageName)
+		{
+			TreeView->SetSelection(Item);
+			TreeView->SetItemExpansion(Item, true);
+			TreeView->RequestScrollIntoView(Item);
+			return;
+		}
+	}
+
+	// Not in the list: the registry did not know it, so the analyzer skipped it and logged why.
+	StatusLine = FString::Printf(TEXT("%s is not in the Asset Registry, so it could not be inspected."), *PackageName.ToString());
+}
+
+void SPulseMemoryAuditorPanel::OnDragEnter(const FGeometry& MyGeometry, const FDragDropEvent& DragDropEvent)
+{
+	if (const TSharedPtr<FAssetDragDropOp> Operation = DragDropEvent.GetOperationAs<FAssetDragDropOp>())
+	{
+		Operation->SetToolTip(LOCTEXT("DropToInspect", "Inspect memory cost"), FAppStyle::GetBrush("Graph.ConnectorFeedback.OK"));
+	}
+}
+
+void SPulseMemoryAuditorPanel::OnDragLeave(const FDragDropEvent& DragDropEvent)
+{
+	if (const TSharedPtr<FAssetDragDropOp> Operation = DragDropEvent.GetOperationAs<FAssetDragDropOp>())
+	{
+		Operation->ResetToDefaultToolTip();
+	}
+}
+
+FReply SPulseMemoryAuditorPanel::OnDragOver(const FGeometry& MyGeometry, const FDragDropEvent& DragDropEvent)
+{
+	const TSharedPtr<FAssetDragDropOp> Operation = DragDropEvent.GetOperationAs<FAssetDragDropOp>();
+	return Operation.IsValid() && Operation->HasAssets() ? FReply::Handled() : FReply::Unhandled();
+}
+
+FReply SPulseMemoryAuditorPanel::OnDrop(const FGeometry& MyGeometry, const FDragDropEvent& DragDropEvent)
+{
+	const TSharedPtr<FAssetDragDropOp> Operation = DragDropEvent.GetOperationAs<FAssetDragDropOp>();
+	if (!Operation.IsValid() || !Operation->HasAssets())
+	{
+		return FReply::Unhandled();
+	}
+
+	TArray<FName> PackageNames;
+	for (const FAssetData& Asset : Operation->GetAssets())
+	{
+		PackageNames.AddUnique(Asset.PackageName);
+	}
+	InspectPackages(PackageNames);
 	return FReply::Handled();
 }
 
@@ -625,6 +773,14 @@ void SPulseMemoryAuditorPanel::ApplyFilters()
 		for (const TSharedPtr<FPulseMemoryTreeItem>& Item : AllRootItems)
 		{
 			const FPulseMemoryRoot& Root = Report->Roots[Item->RootIndex];
+
+			// Inspected rows ignore the filters: they were asked for by name, and hiding one because it
+			// also happens to be a Blueprint would look like the drop did nothing.
+			if (Root.bInspected)
+			{
+				VisibleRootItems.Add(Item);
+				continue;
+			}
 			if (HiddenKinds.Contains(Root.Kind))
 			{
 				continue;
@@ -725,6 +881,14 @@ void SPulseMemoryAuditorPanel::SortItems(TArray<TSharedPtr<FPulseMemoryTreeItem>
 		if (Left->bHard != Right->bHard)
 		{
 			return Left->bHard;
+		}
+
+		// Inspected top-level rows stay pinned above the ranking, in any sort.
+		const bool bLeftPinned = Left->bIsRoot && ReportRef.Roots[Left->RootIndex].bInspected;
+		const bool bRightPinned = Right->bIsRoot && ReportRef.Roots[Right->RootIndex].bInspected;
+		if (bLeftPinned != bRightPinned)
+		{
+			return bLeftPinned;
 		}
 
 		const FPulseMemoryNode& LeftNode = ReportRef.Nodes[Left->NodeIndex];
@@ -844,6 +1008,35 @@ TSharedPtr<SWidget> SPulseMemoryAuditorPanel::OnContextMenuOpening()
 		FSlateIcon(FAppStyle::GetAppStyleSetName(), "ContentBrowser.ReferenceViewer"),
 		FUIAction(FExecuteAction::CreateSP(this, &SPulseMemoryAuditorPanel::OpenReferenceViewer, Item)));
 
+	if (Item->bIsRoot)
+	{
+		// First entry for a top-level row: it is the step the whole drag-in workflow leads to.
+		MenuBuilder.AddMenuEntry(
+			LOCTEXT("ExportAssetReport", "Export Asset Report"),
+			LOCTEXT("ExportAssetReportTooltip", "Write Summary.md and Dependencies.csv for this asset: its biggest cuts ranked by how much they save it, each with every reference that has to go. Opens the folder when done."),
+			FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Save"),
+			FUIAction(FExecuteAction::CreateSP(this, &SPulseMemoryAuditorPanel::ExportAssetReport, Item)));
+		MenuBuilder.AddSeparator();
+	}
+
+	const bool bInspected = Item->bIsRoot && Report->Roots[Item->RootIndex].bInspected;
+	if (bInspected)
+	{
+		MenuBuilder.AddMenuEntry(
+			LOCTEXT("StopInspecting", "Stop Inspecting"),
+			LOCTEXT("StopInspectingTooltip", "Remove this asset from the inspected set and re-run the analysis."),
+			FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.X"),
+			FUIAction(FExecuteAction::CreateSP(this, &SPulseMemoryAuditorPanel::StopInspectingItem, Item)));
+	}
+	else
+	{
+		MenuBuilder.AddMenuEntry(
+			LOCTEXT("Inspect", "Inspect"),
+			LOCTEXT("InspectTooltip", "Pin this asset at the top as its own entry, with everything it loads."),
+			FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Search"),
+			FUIAction(FExecuteAction::CreateSP(this, &SPulseMemoryAuditorPanel::InspectItem, Item)));
+	}
+
 	if (!Item->bIsRoot)
 	{
 		MenuBuilder.AddMenuEntry(
@@ -854,6 +1047,51 @@ TSharedPtr<SWidget> SPulseMemoryAuditorPanel::OnContextMenuOpening()
 	}
 
 	return MenuBuilder.MakeWidget();
+}
+
+void SPulseMemoryAuditorPanel::InspectItem(TSharedPtr<FPulseMemoryTreeItem> Item)
+{
+	if (Item.IsValid() && !Item->bIsPlaceholder && Report.IsValid())
+	{
+		InspectPackages({ Report->Nodes[Item->NodeIndex].PackageName });
+	}
+}
+
+void SPulseMemoryAuditorPanel::ExportAssetReport(TSharedPtr<FPulseMemoryTreeItem> Item)
+{
+	if (!Item.IsValid() || !Item->bIsRoot || !Report.IsValid())
+	{
+		return;
+	}
+
+	const UPulseMemoryAuditorSettings& Settings = *GetDefault<UPulseMemoryAuditorSettings>();
+	FPulseMemoryAuditorConfig Config;
+	Config.ApplySettingsDefaults(Settings);
+
+	FPulseMemoryReportWriter Writer(Config.ReportDir, Config.MaxDependenciesPerRootInReport, Config.MaxHistoricalRuns);
+	FString Error;
+	if (!Writer.WriteAssetReport(*Report, Item->RootIndex, Error))
+	{
+		StatusLine = FString::Printf(TEXT("Asset report failed: %s"), *Error);
+		UE_LOG(LogPulse, Error, TEXT("%s"), *Error);
+		return;
+	}
+
+	LastExportDir = Writer.GetAssetReportDir();
+	StatusLine = FString::Printf(TEXT("Asset report written to %s"), *LastExportDir);
+	UE_LOG(LogPulse, Display, TEXT("Memory asset report written to %s"), *LastExportDir);
+	FPlatformProcess::ExploreFolder(*LastExportDir);
+}
+
+void SPulseMemoryAuditorPanel::StopInspectingItem(TSharedPtr<FPulseMemoryTreeItem> Item)
+{
+	if (!Item.IsValid() || !Report.IsValid())
+	{
+		return;
+	}
+
+	InspectedPackages.Remove(Report->Nodes[Item->NodeIndex].PackageName);
+	RunAnalysis();
 }
 
 void SPulseMemoryAuditorPanel::BrowseToItem(const TSharedPtr<FPulseMemoryTreeItem> Item) const

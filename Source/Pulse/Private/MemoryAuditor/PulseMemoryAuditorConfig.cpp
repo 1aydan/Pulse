@@ -24,6 +24,21 @@ bool FPulseMemoryAuditorConfig::Parse(const FString& Params, FPulseMemoryAuditor
 		}
 	}
 
+	if (FParse::Value(*Params, TEXT("inspect="), RawValue))
+	{
+		RawValue.ParseIntoArray(OutConfig.InspectAssets, TEXT(","), /*InCullEmpty*/ true);
+		for (FString& Path : OutConfig.InspectAssets)
+		{
+			Path.TrimStartAndEndInline();
+		}
+		OutConfig.InspectAssets.RemoveAll([](const FString& Path) { return Path.IsEmpty(); });
+		if (OutConfig.InspectAssets.Num() == 0)
+		{
+			OutError = TEXT("-inspect= was given but listed no assets.");
+			return false;
+		}
+	}
+
 	if (FParse::Value(*Params, TEXT("reportdir="), RawValue))
 	{
 		OutConfig.ReportDir = RawValue.TrimQuotes();
@@ -78,13 +93,15 @@ void FPulseMemoryAuditorConfig::ApplySettingsDefaults(const UPulseMemoryAuditorS
 FString FPulseMemoryAuditorConfig::ToString() const
 {
 	return FString::Printf(
-		TEXT("paths=[%s] maps=%s primaryassets=%s gamemaps=%s alwaysloaded=%d rootclasses=%d soft=%s reportdir=%s"),
+		TEXT("paths=[%s] maps=%s primaryassets=%s blueprints=%s gamemaps=%s alwaysloaded=%d rootclasses=%d inspect=%d soft=%s reportdir=%s"),
 		*FString::Join(PathFilter, TEXT(",")),
 		Roots.bIncludeMaps ? TEXT("true") : TEXT("false"),
 		Roots.bIncludePrimaryAssets ? TEXT("true") : TEXT("false"),
+		Roots.bIncludeBlueprints ? TEXT("true") : TEXT("false"),
 		Roots.bIncludeGameMapsSettings ? TEXT("true") : TEXT("false"),
 		Roots.AlwaysLoadedAssets.Num(),
 		Roots.AdditionalRootClasses.Num(),
+		InspectAssets.Num(),
 		Estimation.bIncludeSoftReferences ? TEXT("true") : TEXT("false"),
 		*ReportDir);
 }
