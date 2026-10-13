@@ -368,6 +368,128 @@ applies here.
 - The panel spawns transient actors into your open level and holds a realtime override on the
   viewport while it runs. Both are removed when the run ends or is cancelled, and nothing is saved.
 
+## Memory auditor
+
+The asset audit judges assets one at a time. The memory auditor answers a different question: **what
+does loading this keep in memory, and why?** It ranks every top-level asset by the RAM and VRAM its
+hard references keep resident, and for each one lists the dependencies responsible along with the
+reference chain that pulls each of them in.
+
+```
+UnrealEditor-Cmd.exe <Project>.uproject -run=Pulse.PulseMemoryAuditor -unattended -nosplash -nop4 -nullrhi
+```
+
+Or open **Tools → Pulse Memory Auditor** and press **Analyze**. Both read only the Asset Registry —
+nothing is loaded — so a whole project takes seconds, and `-nullrhi` is fine.
+
+### Top-level assets
+
+| Kind | Where it comes from |
+|---|---|
+| **Always loaded** | The Maps & Modes default GameMode and GameInstance class, plus `AlwaysLoadedAssets`. Resident in every map |
+| **Map** | Every map under the scan paths |
+| **Primary asset** | Everything the Asset Manager lists under the scan paths |
+| **Configured** | Every asset of an `AdditionalRootClasses` class, e.g. `/Script/Engine.Blueprint` to rank every Blueprint |
+
+An asset that qualifies twice is listed once, under the first kind in that table. Dependencies are
+followed wherever they lead, including engine and plugin content; the scan paths only choose the
+top-level assets.
+
+### The numbers
+
+| Column | Top-level row | Dependency row |
+|---|---|---|
+| **RAM / VRAM** | Everything it keeps resident: itself plus its whole hard-reference closure | The package itself |
+| **Unique RAM / VRAM** | What leaves memory if nothing loads it any more | The same, for that dependency |
+| **Reach** | Packages it loads | How many top-level assets load it |
+| **Src** | Share of the total computed from tags rather than disk size | `Tags`, `Disk` or `?` |
+| **Via** | Why it is top-level | The shortest reference chain from the top-level asset, flagged `[+N other referencers]` when more than one package holds it |
+
+**Unique** is the column to act on. A Blueprint showing 800 MB total and 2 MB unique is fine: that
+memory is shared and would be loaded anyway. One showing 300 MB unique is the problem. Unique is the
+asset's retained size: its subtree in the dominator tree of the hard-reference graph, the same measure
+a heap profiler reports. It accounts for overlap between top-level assets, so a pawn that the GameMode
+also references still gets credit for what only the pawn pulls in.
+
+The summary line reports the **baseline**: the union of what the always-loaded assets keep resident.
+That memory is paid in every map before the map loads anything, which makes it the most important
+number in the report.
+
+### What counts and what does not
+
+- **Hard references only** count toward the totals, and only game dependencies; editor-only
+  references never load in a cooked build.
+- **Soft references** are listed greyed as *may load* (toggle **Show may-load**) and never count.
+  Code decides whether they load.
+- **Streaming** bytes are never counted as resident. A streaming texture keeps only its smallest
+  mips (the engine's resident-mip floor) in memory while referenced; the rest streams on demand. The
+  same goes for Nanite pages, mesh distance fields, virtual textures and compressed audio. The
+  streaming figure appears in tooltips and in the CSVs.
+- **World Partition** maps: actors stream per cell, so they are *may load*, and a partitioned map's
+  total is its persistent level only. A non-partitioned map that stores actors one file per actor
+  loads them all with the map, so they are counted.
+
+### Estimates, not measurements
+
+Sizes come from registry tags:
+
+| Class | Estimate |
+|---|---|
+| Texture2D | Built pixel format × dimensions, clamped by `MaxTextureSize` and `LODBias`, with the mip chain; split by the engine's `IsPossibleToStream` rules |
+| StaticMesh / SkeletalMesh | Vertex and index buffers from vertex/triangle counts across the LOD chain (each LOD assumed to carry half the previous one), plus skin weights |
+| AnimSequence | The engine's own compressed-size tag |
+| SoundWave | Duration × sample rate × channels as 16-bit PCM, divided by `AudioCompressionRatio`, as streaming |
+| Everything else | Editor package size on disk, bucketed by class (textures and built lighting to VRAM, the rest to RAM) |
+
+Disk size includes editor-only data such as Blueprint and material graphs, so it usually overstates.
+Device-profile texture LOD settings, platform-specific formats and shader maps are not modelled. Use
+the numbers to **rank and to find the chain**, not to budget to the byte; every row says where its
+size came from.
+
+### Switches
+
+| Switch | Effect |
+|---|---|
+| `-path=/Game/A,/Game/B` | Take top-level assets only from these paths. Default: the auditor's `ScanPaths` |
+| `-reportdir=<dir>` | Override the report directory (default `Saved/Pulse/MemoryAuditor`) |
+| `-nosoft` | Skip soft references entirely (no *may load* rows) |
+| `-failoverbudget` | Exit 1 when the baseline or any top-level asset exceeds a configured budget |
+
+Exit codes follow the other commandlets: 0 ran, 1 over budget with `-failoverbudget` (or a report
+could not be written), 2 bad invocation or nothing to analyse. `Tools/Invoke-PulseMemoryAudit.ps1`
+wraps it for CI.
+
+### Breaking a chain
+
+Expand a top-level asset, sort by **Unique VRAM** or **Unique RAM**, and read **Via** for the
+biggest rows. Via is the shortest route; when it ends in `[+N other referencers]`, hover it for the
+full list of packages that reference the asset directly. The asset leaves memory only once every one
+of them drops the reference (switches it to a soft reference, or stops referencing it). A common fix
+is a cast to a Blueprint class in a frequently loaded Blueprint: casting hard-references the target
+class and everything it references. Replacing the cast with an interface or a native base class
+breaks that link. Right-click a row to open the Reference Viewer on it, or to copy the chain and
+referencer list into a ticket.
+
+### Reports
+
+`Saved/Pulse/MemoryAuditor/MemoryAudit_<timestamp>/`:
+
+| File | Contents |
+|---|---|
+| `Roots.csv` | One row per top-level asset: total, unique and may-load bytes, package counts, over-budget flag |
+| `Dependencies.csv` | Each top-level asset's largest dependencies (`MaxDependenciesPerRootInReport`, hard and soft capped separately), each with its shortest reference chain (`Via`) and every package that references it directly (`Referencers`, `ReferencedBy`) |
+| `Assets.csv` | Every package any top-level asset loads: own size, retained size, how many top-level assets reach it |
+| `Run.json` | Baseline, totals, the settings used, and what the estimates do and do not include |
+
+Byte columns are raw integers. File contents carry no timestamp or machine name, so an unchanged
+project produces byte-identical files and a diff shows only real change.
+
+### Settings
+
+**Project Settings → Plugins → Pulse - Memory Auditor**, stored in `Config/DefaultPulse.ini` under
+`[/Script/Pulse.PulseMemoryAuditorSettings]`. A separate section from `UPulseSettings`, so a budget
+change never moves the asset audit's `SettingsHash`. Budgets are in megabytes; 0 disables a check.
+
 ## Editor panel
 
 **Tools → Pulse Audit** runs the same scan interactively:

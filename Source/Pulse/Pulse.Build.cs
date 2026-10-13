@@ -17,9 +17,11 @@ public class Pulse : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
+			"ApplicationCore",
 			"AssetRegistry",
 			"ContentBrowser",
 			"DeveloperSettings",
+			"EngineSettings",
 			"InputCore",
 			"Json",
 			"LevelEditor",

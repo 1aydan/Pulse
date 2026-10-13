@@ -3,10 +3,49 @@
 All notable changes to Pulse are recorded here. Versions follow the `VersionName` field in
 `Pulse.uplugin`.
 
-## Unreleased
+## 0.2.0
 
 ### Added
 
+- `Pulse.PulseMemoryAuditor` commandlet and **Tools → Pulse Memory Auditor** panel: ranks every
+  top-level asset — maps, primary assets, and the always-loaded set — by the RAM and VRAM its hard
+  references keep resident, and lists each one's dependencies with the shortest reference chain that
+  loads them. Registry-only: no package is loaded, so a whole project analyses in seconds and the
+  reports are byte-identical across reruns on unchanged content.
+- Two costs per top-level asset. **Total** is everything it hard-references; **Unique** is what
+  leaves memory if nothing loads it any more, computed as its subtree in the dominator tree of the
+  hard-reference graph — the "retained size" a heap profiler reports — so a root that shares a
+  material library with everything else is not blamed for it.
+- An always-loaded **baseline**: the union of what the Maps & Modes GameMode and GameInstance and
+  any configured `AlwaysLoadedAssets` keep resident, i.e. the memory paid in every map before the
+  map loads anything.
+- Sizes estimated from registry tags. Textures from their built pixel format, dimensions, max size,
+  LOD bias and mip settings, split into resident mips and streaming mips using the engine's own
+  `IsPossibleToStream` rules and resident-mip floor; virtual textures count as streaming. Static and
+  skeletal meshes from vertex and triangle counts across their LOD chain, with Nanite pages and
+  distance fields as streaming. Animations from the engine's compressed-size tag; sound waves as
+  streamed compressed audio. Everything else falls back to editor disk size, labelled `DiskSize` on
+  every row so an estimate is never mistaken for a measurement.
+- Streaming bytes are reported separately and never counted as resident: a hard reference to a
+  streaming texture keeps only its low mips in memory.
+- Soft references, and World Partition actors (which stream per cell), are reported as **may load**
+  and never counted in the totals. Actors of a non-partitioned one-file-per-actor map load with the
+  map and are counted.
+- Reports in `Saved/Pulse/MemoryAuditor/MemoryAudit_<timestamp>/`: `Roots.csv`, `Dependencies.csv`
+  (each root's largest dependencies with their reference chain), `Assets.csv`, and `Run.json`.
+- Breaking a chain needs every reference, not just one: each dependency lists all the packages in
+  that root's closure that reference it directly (`Referencers`, `ReferencedBy` in
+  `Dependencies.csv`; `[+N other referencers]` and a full list in the panel's Via tooltip). The
+  shortest chain shows how it gets loaded; the referencer list shows what has to change for it to
+  stop loading.
+- `UPulseMemoryAuditorSettings` in `Config/DefaultPulse.ini`: which kinds of asset count as
+  top-level, extra always-loaded assets, `AdditionalRootClasses` (e.g. every Blueprint), the audio
+  compression ratio, and optional RAM/VRAM budgets for the baseline and per top-level asset, gated
+  in CI with `-failoverbudget`.
+- The panel ranks largest-first with sortable RAM, VRAM, Unique and Reach columns, filters by kind
+  and name, and expands each asset to its dependency list. Double-click browses to an asset without
+  loading it; the context menu opens the engine's Reference Viewer or copies the reference chain.
+- `Tools/Invoke-PulseMemoryAudit.ps1`, the CI wrapper for the memory commandlet.
 - `Pulse.PulseNiagaraAuditor` commandlet: measures what Niagara systems actually cost by spawning
   them on a headless stage and ticking them, rather than reading what they declare. Game-thread
   cost per system from `FParticlePerfStats` — the source the Niagara Debugger's Outliner reads —

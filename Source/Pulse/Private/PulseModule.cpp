@@ -8,6 +8,7 @@
 #include "PulseCollectorRegistry.h"
 #include "Styling/AppStyle.h"
 #include "UI/SPulseAuditPanel.h"
+#include "UI/SPulseMemoryAuditorPanel.h"
 #include "UI/SPulseNiagaraAuditorPanel.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "WorkspaceMenuStructure.h"
@@ -19,6 +20,7 @@ DEFINE_LOG_CATEGORY(LogPulse);
 
 static const FName GPulseAuditTabName(TEXT("PulseAudit"));
 static const FName GPulseNiagaraAuditorTabName(TEXT("PulseNiagaraAuditor"));
+static const FName GPulseMemoryAuditorTabName(TEXT("PulseMemoryAuditor"));
 
 static TSharedRef<SDockTab> SpawnPulseAuditTab(const FSpawnTabArgs& Args)
 {
@@ -35,6 +37,15 @@ static TSharedRef<SDockTab> SpawnPulseNiagaraAuditorTab(const FSpawnTabArgs& Arg
 		.TabRole(ETabRole::NomadTab)
 		[
 			SNew(SPulseNiagaraAuditorPanel)
+		];
+}
+
+static TSharedRef<SDockTab> SpawnPulseMemoryAuditorTab(const FSpawnTabArgs& Args)
+{
+	return SNew(SDockTab)
+		.TabRole(ETabRole::NomadTab)
+		[
+			SNew(SPulseMemoryAuditorPanel)
 		];
 }
 
@@ -76,6 +87,13 @@ void FPulseModule::StartupModule()
 		.SetTooltipText(LOCTEXT("NiagaraTabTooltip", "Spawn Niagara systems in the current level and measure their game-thread cost across quality levels and distances."))
 		.SetGroup(MenuGroup.ToSharedRef())
 		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "ClassIcon.NiagaraSystem"));
+
+	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(GPulseMemoryAuditorTabName,
+		FOnSpawnTab::CreateStatic(&SpawnPulseMemoryAuditorTab))
+		.SetDisplayName(LOCTEXT("MemoryTabTitle", "Pulse Memory Auditor"))
+		.SetTooltipText(LOCTEXT("MemoryTabTooltip", "Rank maps, primary assets and always-loaded classes by the RAM and VRAM their hard references keep resident."))
+		.SetGroup(MenuGroup.ToSharedRef())
+		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "ContentBrowser.SizeMap"));
 }
 
 void FPulseModule::ShutdownModule()
@@ -84,6 +102,7 @@ void FPulseModule::ShutdownModule()
 	{
 		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(GPulseAuditTabName);
 		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(GPulseNiagaraAuditorTabName);
+		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(GPulseMemoryAuditorTabName);
 	}
 	if (MenuGroup.IsValid())
 	{
