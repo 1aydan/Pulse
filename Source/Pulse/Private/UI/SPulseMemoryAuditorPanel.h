@@ -49,8 +49,9 @@ struct FPulseMemoryTreeItem
 };
 
 /**
- * The Tools > Pulse Memory Auditor tab: every top-level asset ranked by what it keeps in RAM and
- * VRAM, expandable to the dependencies responsible, each with the reference chain that loads it.
+ * The Memory Auditor section of the Tools > Pulse window: every top-level asset ranked by what it
+ * keeps in RAM and VRAM, expandable to the dependencies responsible, each with the reference chain
+ * that loads it.
  *
  * Runs the same FPulseMemoryAnalyzer as the commandlet. It reads only the Asset Registry, so a run
  * takes seconds and is wrapped in a slow-task dialog rather than ticked across frames.

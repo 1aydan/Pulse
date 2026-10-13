@@ -3,6 +3,25 @@
 All notable changes to Pulse are recorded here. Versions follow the `VersionName` field in
 `Pulse.uplugin`.
 
+## 0.3.0
+
+### Changed
+
+- The three editor tools now share one window, **Tools → Pulse**, with segmented buttons across the
+  top for **Asset Audit**, **Niagara Auditor** and **Memory Auditor**, replacing three separate
+  Tools menu entries. Each tool's panel is unchanged.
+- Every panel is built once and kept alive while another is showing, so a running Niagara
+  measurement is not cancelled by switching sections, and each tool keeps its results across
+  switches. The window reopens on the section shown last, per user and per project.
+- The old per-tool tab ids (`PulseAudit`, `PulseNiagaraAuditor`, `PulseMemoryAuditor`) stay
+  registered but hidden from menus, so an editor layout saved with one of them open restores as the
+  Pulse window on that tool instead of losing the tab.
+
+### Fixed
+
+- The Niagara tool's icon is looked up across every registered style. It lives in the Niagara
+  editor's own style set, not the app style the tab previously asked, so it never resolved.
+
 ## 0.2.0
 
 ### Added

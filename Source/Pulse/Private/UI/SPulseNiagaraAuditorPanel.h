@@ -28,8 +28,8 @@ struct FPulseNiagaraResultItem
 };
 
 /**
- * The Tools > Pulse Niagara Auditor tab. Runs the same FPulseNiagaraAuditDriver the commandlet
- * uses, stepped from a ticker so the editor stays responsive.
+ * The Niagara Auditor section of the Tools > Pulse window. Runs the same FPulseNiagaraAuditDriver
+ * the commandlet uses, stepped from a ticker so the editor stays responsive.
  *
  * The panel exists for more than convenience: it measures in the level editor's own world, which
  * the viewport renders every frame, and that is the only place Niagara can cache the views its

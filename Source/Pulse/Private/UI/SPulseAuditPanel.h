@@ -17,10 +17,10 @@ class STextBlock;
 struct FPulseIssueListItem;
 
 /**
- * The Tools > Pulse Audit tab. Runs the same FPulseScanDriver the commandlet uses, stepped from a
- * ticker at frame budget so a Deep scan of a large project never blocks the editor. Results are
- * clickable through to the Content Browser, and Export writes the identical files the commandlet
- * produces.
+ * The Asset Audit section of the Tools > Pulse window. Runs the same FPulseScanDriver the
+ * commandlet uses, stepped from a ticker at frame budget so a Deep scan of a large project never
+ * blocks the editor. Results are clickable through to the Content Browser, and Export writes the
+ * identical files the commandlet produces.
  */
 class SPulseAuditPanel : public SCompoundWidget
 {

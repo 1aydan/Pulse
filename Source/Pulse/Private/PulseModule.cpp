@@ -7,9 +7,7 @@
 #include "PulseCollector.h"
 #include "PulseCollectorRegistry.h"
 #include "Styling/AppStyle.h"
-#include "UI/SPulseAuditPanel.h"
-#include "UI/SPulseMemoryAuditorPanel.h"
-#include "UI/SPulseNiagaraAuditorPanel.h"
+#include "UI/SPulseHub.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "WorkspaceMenuStructure.h"
 #include "WorkspaceMenuStructureModule.h"
@@ -18,34 +16,24 @@
 
 DEFINE_LOG_CATEGORY(LogPulse);
 
-static const FName GPulseAuditTabName(TEXT("PulseAudit"));
-static const FName GPulseNiagaraAuditorTabName(TEXT("PulseNiagaraAuditor"));
-static const FName GPulseMemoryAuditorTabName(TEXT("PulseMemoryAuditor"));
+/** The one Pulse window. */
+static const FName GPulseHubTabName(TEXT("Pulse"));
 
-static TSharedRef<SDockTab> SpawnPulseAuditTab(const FSpawnTabArgs& Args)
+// The per-tool tab ids from before the tools shared a window. Still registered, hidden from menus, so
+// an editor layout saved with one of them open restores as the Pulse window on that tool rather than
+// silently dropping the tab.
+static const FName GPulseLegacyAuditTabName(TEXT("PulseAudit"));
+static const FName GPulseLegacyNiagaraAuditorTabName(TEXT("PulseNiagaraAuditor"));
+static const FName GPulseLegacyMemoryAuditorTabName(TEXT("PulseMemoryAuditor"));
+
+static TSharedRef<SDockTab> SpawnPulseHubTab(const FSpawnTabArgs& Args, TOptional<EPulseHubSection> InitialSection)
 {
 	return SNew(SDockTab)
 		.TabRole(ETabRole::NomadTab)
+		.Label(LOCTEXT("HubTabLabel", "Pulse"))
 		[
-			SNew(SPulseAuditPanel)
-		];
-}
-
-static TSharedRef<SDockTab> SpawnPulseNiagaraAuditorTab(const FSpawnTabArgs& Args)
-{
-	return SNew(SDockTab)
-		.TabRole(ETabRole::NomadTab)
-		[
-			SNew(SPulseNiagaraAuditorPanel)
-		];
-}
-
-static TSharedRef<SDockTab> SpawnPulseMemoryAuditorTab(const FSpawnTabArgs& Args)
-{
-	return SNew(SDockTab)
-		.TabRole(ETabRole::NomadTab)
-		[
-			SNew(SPulseMemoryAuditorPanel)
+			SNew(SPulseHub)
+			.InitialSection(InitialSection)
 		];
 }
 
@@ -64,50 +52,39 @@ void FPulseModule::StartupModule()
 
 	UE_LOG(LogPulse, Log, TEXT("Pulse module loaded with %d built-in collectors."), OwnedCollectors.Num());
 
-	// Tab registration comes after the collectors: the panel queries the registry as soon as a user
-	// presses Run, and a tab that could spawn before its collectors exist would audit nothing.
-	MenuGroup = WorkspaceMenu::GetMenuStructure().GetToolsCategory()->AddGroup(
-		FName(TEXT("Pulse")),
-		LOCTEXT("MenuGroup", "Pulse"),
-		LOCTEXT("MenuGroupTooltip", "Read-only asset performance auditing"),
-		FSlateIcon(FAppStyle::GetAppStyleSetName(), "MaterialEditor.TogglePlatformStats.Tab"));
-
-	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(GPulseAuditTabName,
-		FOnSpawnTab::CreateStatic(&SpawnPulseAuditTab))
-		.SetDisplayName(LOCTEXT("TabTitle", "Pulse Audit"))
-		.SetTooltipText(LOCTEXT("TabTooltip", "Audit project assets for performance issues and export deterministic CSV/JSON reports."))
-		.SetGroup(MenuGroup.ToSharedRef())
+	// Tab registration comes after the collectors: the audit panel queries the registry as soon as a
+	// user presses Run, and a tab that could spawn before its collectors exist would audit nothing.
+	// Registered straight under Tools: every tool lives in this one window, so a "Pulse" submenu
+	// holding a single "Pulse" entry would only add a click.
+	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(GPulseHubTabName,
+		FOnSpawnTab::CreateStatic(&SpawnPulseHubTab, TOptional<EPulseHubSection>()))
+		.SetDisplayName(LOCTEXT("HubTabTitle", "Pulse"))
+		.SetTooltipText(LOCTEXT("HubTabTooltip", "Pulse tools: the asset audit, the Niagara cost auditor and the memory auditor, in one window."))
+		.SetGroup(WorkspaceMenu::GetMenuStructure().GetToolsCategory())
 		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "MaterialEditor.TogglePlatformStats.Tab"));
 
-	// Separate tab, not a mode of the audit panel: this one spawns and ticks content in the user's
-	// open level, which is a different kind of act from a read-only scan and should look like one.
-	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(GPulseNiagaraAuditorTabName,
-		FOnSpawnTab::CreateStatic(&SpawnPulseNiagaraAuditorTab))
-		.SetDisplayName(LOCTEXT("NiagaraTabTitle", "Pulse Niagara Auditor"))
-		.SetTooltipText(LOCTEXT("NiagaraTabTooltip", "Spawn Niagara systems in the current level and measure their game-thread cost across quality levels and distances."))
-		.SetGroup(MenuGroup.ToSharedRef())
-		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "ClassIcon.NiagaraSystem"));
-
-	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(GPulseMemoryAuditorTabName,
-		FOnSpawnTab::CreateStatic(&SpawnPulseMemoryAuditorTab))
-		.SetDisplayName(LOCTEXT("MemoryTabTitle", "Pulse Memory Auditor"))
-		.SetTooltipText(LOCTEXT("MemoryTabTooltip", "Rank maps, primary assets and always-loaded classes by the RAM and VRAM their hard references keep resident."))
-		.SetGroup(MenuGroup.ToSharedRef())
-		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "ContentBrowser.SizeMap"));
+	const TPair<FName, EPulseHubSection> LegacyTabs[] = {
+		{ GPulseLegacyAuditTabName, EPulseHubSection::AssetAudit },
+		{ GPulseLegacyNiagaraAuditorTabName, EPulseHubSection::NiagaraAuditor },
+		{ GPulseLegacyMemoryAuditorTabName, EPulseHubSection::MemoryAuditor },
+	};
+	for (const TPair<FName, EPulseHubSection>& LegacyTab : LegacyTabs)
+	{
+		FGlobalTabmanager::Get()->RegisterNomadTabSpawner(LegacyTab.Key,
+			FOnSpawnTab::CreateStatic(&SpawnPulseHubTab, TOptional<EPulseHubSection>(LegacyTab.Value)))
+			.SetDisplayName(LOCTEXT("HubTabTitle", "Pulse"))
+			.SetMenuType(ETabSpawnerMenuType::Hidden);
+	}
 }
 
 void FPulseModule::ShutdownModule()
 {
 	if (FSlateApplication::IsInitialized())
 	{
-		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(GPulseAuditTabName);
-		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(GPulseNiagaraAuditorTabName);
-		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(GPulseMemoryAuditorTabName);
-	}
-	if (MenuGroup.IsValid())
-	{
-		WorkspaceMenu::GetMenuStructure().GetToolsCategory()->RemoveItem(MenuGroup.ToSharedRef());
-		MenuGroup.Reset();
+		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(GPulseHubTabName);
+		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(GPulseLegacyAuditTabName);
+		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(GPulseLegacyNiagaraAuditorTabName);
+		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(GPulseLegacyMemoryAuditorTabName);
 	}
 
 	for (const TUniquePtr<IPulseCollector>& Collector : OwnedCollectors)

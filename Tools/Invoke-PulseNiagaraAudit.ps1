@@ -26,7 +26,7 @@
     from a local PlayerController with a real viewport or from the level editor viewport, and a
     commandlet has neither. Costs from this script are UNCULLED, and Run.json records that as
     scalabilityCullingExercised: false. To measure culling by distance, use the editor panel
-    (Tools > Pulse Niagara Auditor) or the Pulse.Niagara.Audit console command.
+    (Tools > Pulse > Niagara Auditor) or the Pulse.Niagara.Audit console command.
 
 .PARAMETER ProjectFile
     Path to the .uproject to audit. Required.

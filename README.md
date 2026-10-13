@@ -159,7 +159,7 @@ separate `UPulseNiagaraAuditorSettings` section for the same reason — folding 
 
 ### Two front ends
 
-| | Commandlet | **Tools → Pulse Niagara Auditor** |
+| | Commandlet | **Tools → Pulse → Niagara Auditor** |
 |---|---|---|
 | World | Private, created and ticked by the auditor | A **PIE session** it starts and ends |
 | Quality sweep | Yes | Yes |
@@ -379,7 +379,7 @@ reference chain that pulls each of them in.
 UnrealEditor-Cmd.exe <Project>.uproject -run=Pulse.PulseMemoryAuditor -unattended -nosplash -nop4 -nullrhi
 ```
 
-Or open **Tools → Pulse Memory Auditor** and press **Analyze**. Both read only the Asset Registry —
+Or open **Tools → Pulse → Memory Auditor** and press **Analyze**. Both read only the Asset Registry —
 nothing is loaded — so a whole project takes seconds, and `-nullrhi` is fine.
 
 ### Top-level assets
@@ -492,7 +492,12 @@ change never moves the asset audit's `SettingsHash`. Budgets are in megabytes; 0
 
 ## Editor panel
 
-**Tools → Pulse Audit** runs the same scan interactively:
+**Tools → Pulse** opens one window for every Pulse tool, with a row of buttons across the top to
+switch between **Asset Audit**, **Niagara Auditor** and **Memory Auditor**. Each tool keeps running
+and keeps its results while another is showing, so a Niagara measurement is not interrupted by a look
+at the memory report, and the window reopens on whichever tool was showing last.
+
+The **Asset Audit** section runs the same scan as the commandlet, interactively:
 
 - Tier selector (Fast / Deep / ShaderStats) with a cost warning on the latter two, category and
   minimum-severity filters, progress bar and cancel.
