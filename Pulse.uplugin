@@ -1,9 +1,9 @@
 {
 	"FileVersion": 3,
-	"Version": 4,
-	"VersionName": "0.4.0",
+	"Version": 5,
+	"VersionName": "0.5.0",
 	"FriendlyName": "Pulse",
-	"Description": "Read-only performance audit for project assets. A commandlet and editor panel scan the Asset Registry (and, on request, loaded assets) to produce deterministic CSV and JSON reports of performance issues, per-asset scores, and project health, plus estimated RAM and VRAM cost of maps, primary assets and always-loaded classes through their dependencies, for developers, artists, and CI.",
+	"Description": "Read-only performance audit for project assets. A commandlet and editor panel scan the Asset Registry (and, on request, loaded assets) to produce deterministic CSV and JSON reports of performance issues, per-asset scores, and project health, plus estimated RAM and VRAM cost through dependencies, unused and duplicated content, live tick cost captured in Play In Editor, and per-map scene findings, for developers, artists, and CI.",
 	"Category": "Editor",
 	"CreatedBy": "Pulse contributors",
 	"CreatedByURL": "",

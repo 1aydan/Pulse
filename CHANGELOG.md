@@ -3,6 +3,36 @@
 All notable changes to Pulse are recorded here. Versions follow the `VersionName` field in
 `Pulse.uplugin`.
 
+## 0.5.0
+
+### Added
+
+- **Content Cleanup** (`Pulse.PulseContentCleanup`, **Tools → Pulse → Content Cleanup**): content
+  nothing that ships can load, leftover redirectors, and assets imported more than once. "Used" is the
+  memory auditor's walk over hard and soft references from what the cooker starts from — Maps to Cook
+  when set (otherwise every map), primary assets, Maps & Modes, always-loaded assets, Additional Asset
+  Directories to Cook, and a new `AlwaysUsedClasses` setting for content found at runtime by scanning.
+  Unused assets are split into orphans (nothing references them) and unreachable (referenced only by
+  other unused or editor-only content), each with its referencers.
+- The project's and its plugins' `.ini` files and C++ source are searched for unused packages' paths,
+  which the Asset Registry cannot see; a match is flagged amber rather than presented as safe.
+- Duplicate imports grouped by the source file MD5 the engine records, with the disk the extra copies
+  take and the memory paid twice when more than one copy ships.
+- **Tick Auditor** (**Tools → Pulse → Tick Auditor**, `Pulse.Tick.Capture` / `Pulse.Tick.Stop`):
+  start Play In Editor, play, and capture. For a few seconds Pulse runs every actor and component tick
+  itself from one probe per tick group, through each tick function's own `ExecuteTick`, honouring
+  intervals and timing each call, then hands every tick back. Actor classes are ranked by total
+  game-thread cost per frame, with per-instance cost, the actor tick's share, a per-component
+  breakdown, and flags for idle ticks, every-frame ticks, Event Tick and budget overruns.
+- **Scene Auditor** (`Pulse.PulseSceneAudit`, **Tools → Pulse → Scene Auditor**): what each map places
+  and lights. Flags overlapping stationary lights that fell back to dynamic shadows (from the lighting
+  build, and skipped when static lighting is off), non-Nanite meshes placed as many separate
+  components, stacked duplicate placements, shadow-casting movable lights and large ones, movable
+  shadow casters, small props with no draw distance, heavy translucency and high-poly non-Nanite
+  meshes. Audits the open map in place — findings then select their actors in the viewport — or loads
+  Maps to Cook (or every map) with their streaming sublevels.
+- `Tools/Invoke-PulseContentCleanup.ps1` and `Tools/Invoke-PulseSceneAudit.ps1` (with `-FailOn`).
+
 ## 0.4.0
 
 ### Added

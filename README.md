@@ -524,10 +524,142 @@ project produces byte-identical files and a diff shows only real change.
 `[/Script/Pulse.PulseMemoryAuditorSettings]`. A separate section from `UPulseSettings`, so a budget
 change never moves the asset audit's `SettingsHash`. Budgets are in megabytes; 0 disables a check.
 
+## Content cleanup
+
+Finds what can go: content nothing that ships can load, redirectors left by moves, and assets imported
+more than once.
+
+```
+UnrealEditor-Cmd.exe <Project>.uproject -run=Pulse.PulseContentCleanup -unattended -nosplash -nop4 -nullrhi
+```
+
+Or **Tools → Pulse → Content Cleanup → Analyze**. Registry-only, like the memory auditor: nothing is
+loaded, and nothing is ever deleted. Rows are selected in the Content Browser, where deleting runs the
+engine's own reference checks again.
+
+### What "unused" means
+
+The memory auditor's dependency walk, started from what the cooker starts from:
+
+- **Maps to Cook** when the project lists any (`bRespectMapsToCook`), otherwise every map. With the list
+  set, content only a demo or test map references shows up as unused too.
+- Primary assets, the Maps & Modes GameMode and GameInstance, and the memory auditor's `AlwaysLoadedAssets`.
+- **Additional Asset Directories to Cook**.
+- `AlwaysUsedClasses`: every asset of these classes. Use it for content the game finds at runtime by
+  scanning rather than by reference, such as definition or item data assets.
+
+Hard **and** soft references count: a soft reference is still a way to be loaded. Anything under the
+scan paths the walk never reaches is listed as:
+
+| Status | Meaning |
+|---|---|
+| **Orphan** | Nothing references it at all |
+| **Unreachable** | Referenced, but only by other unused content or by editor-only references |
+| **Redirector** | A leftover redirector. Fix up redirectors, then delete it |
+
+### Paths the registry cannot see
+
+A package path in an `.ini` value or a C++ string (`ConstructorHelpers`, `TEXT("/Game/...")`) is
+invisible to the Asset Registry, and is the usual way a "dead" asset turns out to be live. With
+`bSearchConfigAndSource` on, the project's `Config/` and `Source/` and every project plugin's
+`Config/` and `Source/` are searched for unused packages' paths. A match is shown amber under
+**Named in config/code** and never presented as safe. Paths assembled at runtime from parts are still
+invisible; nothing here replaces a look before deleting.
+
+### Duplicates
+
+Assets of the same class imported from identical source file content, matched by the MD5 the engine
+records in each asset's import data. Each group shows the disk the extra copies take and, when more
+than one copy actually ships, the memory paid twice. Groups wasting less than `MinDuplicateWasteKB`
+are left out.
+
+### Output
+
+`Saved/Pulse/ContentCleanup/ContentCleanup_<timestamp>/`: `Unused.csv`, `Duplicates.csv`, `Run.json`.
+Switches: `-path=`, `-reportdir=`, `-allmaps` (ignore Maps to Cook), `-nosearch` (skip the config and
+source search). `Tools/Invoke-PulseContentCleanup.ps1` wraps it for CI.
+
+## Tick auditor
+
+What every actor and component tick costs while the game is actually played.
+
+1. Start **Play In Editor** and play to the moment worth measuring.
+2. **Tools → Pulse → Tick Auditor → Capture**, or `Pulse.Tick.Capture [frames]` in the console.
+3. Keep playing. After `CaptureFrames` (default 300, about 5 s) the ranking appears; `Pulse.Tick.Stop` or
+   **Stop** ends early.
+
+Actor classes are ranked by what all their instances together cost the game thread per frame, with the
+per-instance cost, the actor tick's own share, a per-component breakdown in the tooltip, and flags:
+
+| Flag | Meaning |
+|---|---|
+| **Idle tick** | The actor tick is on, costs almost nothing, and there is no Event Tick: turn it off |
+| **Every frame** | A tick with no Tick Interval. Plenty of gameplay ticks are fine at 0.1-0.2 s |
+| **Event Tick** | The Blueprint implements Event Tick |
+| **Over budget** | Past `MaxFrameBudgetPercentPerClass` or `MaxFrameBudgetPercentPerInstance` |
+
+### How it measures
+
+The engine has no per-tick timing outside a profiler capture, so the capture takes the ticks over: every
+enabled actor and component tick is recorded and disabled, and one probe tick per tick group runs them
+itself through each tick function's own `ExecuteTick` (the call the engine makes for ticks that run while
+paused), honouring tick intervals and timing every call. When the capture ends every tick is handed back.
+
+That has costs, stated in every `Run.json`:
+
+- Tick groups are kept; ordering *within* a group is not, so play can stutter briefly.
+- Work the engine runs on worker threads — parallel animation evaluation, async ticks — is timed on the
+  game thread, so those classes read higher than they are in game.
+- Actors spawned during the capture tick normally and are not measured. A tick that game code turns off
+  mid-capture is turned back on when it ends.
+
+For exact per-frame timing with threads intact, use Unreal Insights (`-trace=cpu` with `stat namedevents`);
+the tick auditor is the quick ranking that says where to point it. There is no commandlet — a CI run has no
+game to play.
+
+Reports: `Saved/Pulse/TickAuditor/TickCapture_<timestamp>/` with `Classes.csv`, `Components.csv`, `Run.json`.
+
+## Scene auditor
+
+What each map places and lights.
+
+- **Audit open map** inspects the level being edited, in place. Findings can then **Select Actors** in the
+  viewport.
+- **Audit maps** loads Maps to Cook (or every map under the scan paths, `bOnlyMapsToCook`) one at a time,
+  with their streaming sublevels as rows of their own, the way the asset audit's level collector loads
+  maps. Nothing is modified or saved.
+
+```
+UnrealEditor-Cmd.exe <Project>.uproject -run=Pulse.PulseSceneAudit -unattended -nosplash -nop4 -nullrhi
+```
+
+| Rule | Fires when |
+|---|---|
+| `Scene.StationaryLightOverlap` (High) | A stationary shadow-casting light got no shadowmap channel in the lighting build: more than four overlap, so it casts fully dynamic shadows. Skipped when the project disables static lighting |
+| `Scene.RepeatedMesh` | A non-Nanite mesh is placed as `RepeatedMeshMinCount`+ separate components. Enable Nanite or instance it |
+| `Scene.StackedDuplicates` | Identical mesh placements at the identical transform |
+| `Scene.MovableShadowLights` | More than `MaxMovableShadowLights` movable lights cast shadows |
+| `Scene.LargeShadowLight` | A movable shadow-casting light reaches `LargeShadowLightRadius` or more |
+| `Scene.TooManyPrimitives` | More than `MaxPrimitives` primitive components |
+| `Scene.MovableShadowCasters` | More than `MaxMovableShadowCasters` movable primitives cast dynamic shadows |
+| `Scene.NoCullDistance` | More than `MaxSmallPropsWithoutCullDistance` small non-Nanite props have no draw distance from either the component or a Cull Distance Volume |
+| `Scene.ManyTranslucent` | More than `MaxTranslucentPrimitives` primitives use translucent materials |
+| `Scene.HighPolyNonNanite` | A placed non-Nanite mesh has `HighPolyTriangles`+ at LOD0 |
+
+Per map the panel also shows primitives, non-Nanite triangles, distinct mesh/material pairs (roughly
+what the renderer batches into) and lights. World Partition maps are audited as loaded — the persistent
+level and always-loaded actors, not streamed cells — and content generated at runtime (procedural
+dungeons, PCG at runtime, spawned actors) is not there to see.
+
+Reports: `Saved/Pulse/SceneAuditor/SceneAudit_<timestamp>/` with `Maps.csv`, `Findings.csv`, `Run.json`.
+Switches: `-maps=`, `-path=`, `-allmaps`, `-reportdir=`, `-failon=<Severity>`.
+`Tools/Invoke-PulseSceneAudit.ps1` wraps it for CI.
+
 ## Editor panel
 
 **Tools → Pulse** opens one window for every Pulse tool, with a row of buttons across the top to
-switch between **Asset Audit**, **Niagara Auditor** and **Memory Auditor**. Each tool keeps running
+switch between **Asset Audit**, **Niagara Auditor**, **Memory Auditor**, **Content Cleanup**,
+**Tick Auditor** and **Scene Auditor**. Each tool keeps running
 and keeps its results while another is showing, so a Niagara measurement is not interrupted by a look
 at the memory report, and the window reopens on whichever tool was showing last.
 

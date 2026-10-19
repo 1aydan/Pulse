@@ -5,12 +5,21 @@
 #include "CoreMinimal.h"
 #include "Widgets/SCompoundWidget.h"
 
-/** The tools the Pulse window switches between, in button order. */
+/**
+ * The tools the Pulse window switches between, in button order. Append only: the value is persisted
+ * as the last section shown, and reordering would reopen everyone's window on the wrong tool.
+ */
 enum class EPulseHubSection : uint8
 {
 	AssetAudit,
 	NiagaraAuditor,
-	MemoryAuditor
+	MemoryAuditor,
+	ContentCleanup,
+	TickAuditor,
+	SceneAuditor,
+
+	/** One past the last real section. */
+	Count
 };
 
 /**

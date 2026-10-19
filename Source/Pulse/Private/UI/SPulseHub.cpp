@@ -6,8 +6,11 @@
 #include "Styling/AppStyle.h"
 #include "Styling/SlateIconFinder.h"
 #include "UI/SPulseAuditPanel.h"
+#include "UI/SPulseContentCleanupPanel.h"
 #include "UI/SPulseMemoryAuditorPanel.h"
 #include "UI/SPulseNiagaraAuditorPanel.h"
+#include "UI/SPulseSceneAuditorPanel.h"
+#include "UI/SPulseTickAuditorPanel.h"
 #include "Widgets/Input/SSegmentedControl.h"
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Layout/SWidgetSwitcher.h"
@@ -59,6 +62,21 @@ void SPulseHub::Construct(const FArguments& InArgs)
 			.Text(LOCTEXT("MemoryAuditor", "Memory Auditor"))
 			.ToolTip(LOCTEXT("MemoryAuditorTooltip", "Rank maps, primary assets and always-loaded classes by the RAM and VRAM their hard references keep resident."))
 			.Icon(FAppStyle::GetBrush("ContentBrowser.SizeMap"))
+
+			+ SSegmentedControl<EPulseHubSection>::Slot(EPulseHubSection::ContentCleanup)
+			.Text(LOCTEXT("ContentCleanup", "Content Cleanup"))
+			.ToolTip(LOCTEXT("ContentCleanupTooltip", "Find content nothing that ships can load, leftover redirectors, and assets imported more than once."))
+			.Icon(FAppStyle::GetBrush("Icons.Delete"))
+
+			+ SSegmentedControl<EPulseHubSection>::Slot(EPulseHubSection::TickAuditor)
+			.Text(LOCTEXT("TickAuditor", "Tick Auditor"))
+			.ToolTip(LOCTEXT("TickAuditorTooltip", "While playing in the editor, time every actor and component tick and rank actor classes by what they cost the game thread."))
+			.Icon(FAppStyle::GetBrush("Profiler.Tab"))
+
+			+ SSegmentedControl<EPulseHubSection>::Slot(EPulseHubSection::SceneAuditor)
+			.Text(LOCTEXT("SceneAuditor", "Scene Auditor"))
+			.ToolTip(LOCTEXT("SceneAuditorTooltip", "Inspect what maps place and light: repeated non-Nanite meshes, stacked duplicates, light overlap, dynamic shadows, props with no draw distance."))
+			.Icon(FAppStyle::GetBrush("LevelEditor.Tabs.Viewports"))
 		]
 
 		+ SVerticalBox::Slot()
@@ -88,6 +106,21 @@ void SPulseHub::Construct(const FArguments& InArgs)
 			[
 				SNew(SPulseMemoryAuditorPanel)
 			]
+
+			+ SWidgetSwitcher::Slot()
+			[
+				SNew(SPulseContentCleanupPanel)
+			]
+
+			+ SWidgetSwitcher::Slot()
+			[
+				SNew(SPulseTickAuditorPanel)
+			]
+
+			+ SWidgetSwitcher::Slot()
+			[
+				SNew(SPulseSceneAuditorPanel)
+			]
 		]
 	];
 }
@@ -107,7 +140,7 @@ EPulseHubSection SPulseHub::LoadLastSection()
 	}
 
 	// A value written by a later version with more sections must not index past the switcher.
-	return Stored >= 0 && Stored <= static_cast<int32>(EPulseHubSection::MemoryAuditor)
+	return Stored >= 0 && Stored < static_cast<int32>(EPulseHubSection::Count)
 		? static_cast<EPulseHubSection>(Stored)
 		: EPulseHubSection::AssetAudit;
 }

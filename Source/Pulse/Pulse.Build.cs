@@ -21,6 +21,7 @@ public class Pulse : ModuleRules
 			"AssetRegistry",
 			"ContentBrowser",
 			"DeveloperSettings",
+			"DeveloperToolSettings",
 			"EngineSettings",
 			"InputCore",
 			"Json",
